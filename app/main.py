@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     env_data_source = os.environ.get("DATA_SOURCE")
     default_source = env_data_source if env_data_source else DataSource.USER.value
     
-    parser = argparse.ArgumentParser(description="Oura Biometrics API")
+    parser = argparse.ArgumentParser(description="Biometrics API")
     parser.add_argument(
         "--data-source",
         type=str,
@@ -75,20 +75,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Oura Biometrics API",
+    title="Biometrics API",
     description="""
-## Oura Biometrics API
+## Biometrics API
 
-API for accessing and analyzing Oura ring biometric data.
+API for accessing and analyzing biometric data from wearable devices.
+
+### Supported Data Sources
+- **Oura Ring** (currently implemented)
+- More sources coming soon (Garmin, Whoop, etc.)
 
 ### Features
 - **Sleep Analytics**: Get sleep duration, HR, HRV statistics and percentiles
 - **Heart Rate Analytics**: Analyze heart rate data with daily and detailed breakdowns
-- **OAuth Authentication**: Secure authentication with Oura API
+- **OAuth Authentication**: Secure authentication with data source APIs
 
 ### Data Sources
 Configure via `--data-source` flag or `DATA_SOURCE` environment variable:
-- `user`: Your personal Oura data (requires authentication)
+- `user`: Your personal data (requires authentication)
 - `sandbox`: Cached sandbox data for testing
     """,
     version="0.1.0",
@@ -103,7 +107,7 @@ async def health():
     """Health check endpoint."""
     return {
         "status": "ok",
-        "message": "Oura Biometrics API",
+        "message": "Biometrics API",
         "data_source": oura_client.data_source.value if oura_client else "not initialized",
     }
 

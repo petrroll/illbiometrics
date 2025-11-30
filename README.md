@@ -1,6 +1,14 @@
-# Oura Biometrics API
+# Biometrics API
 
-A minimal FastAPI backend for accessing Oura ring biometric data via OAuth.
+A minimal FastAPI backend for accessing biometric data from wearable devices via OAuth.
+
+Currently supported data sources:
+- **Oura Ring** (implemented)
+
+Future planned integrations:
+- Garmin
+- Whoop
+- and more...
 
 ## Setup
 
@@ -9,7 +17,7 @@ A minimal FastAPI backend for accessing Oura ring biometric data via OAuth.
    uv sync
    ```
 
-2. **Configure OAuth credentials**:
+2. **Configure OAuth credentials** (for Oura):
    - Create an OAuth application at https://cloud.ouraring.com/oauth/applications
    - Copy `.env.example` to `.env` and fill in your credentials:
      ```bash
@@ -24,13 +32,17 @@ A minimal FastAPI backend for accessing Oura ring biometric data via OAuth.
 ## Usage
 
 1. Visit http://localhost:8000/docs to see the API documentation
-2. Navigate to http://localhost:8000/auth/login to authenticate with Oura
-3. After authentication, use http://localhost:8000/heartrate to fetch heart rate data
+2. Navigate to http://localhost:8000/auth/login to authenticate with your data source
+3. After authentication, use the analytics endpoints to fetch biometric data
 
 ## API Endpoints
 
-- `GET /` - Health check
-- `GET /auth/login` - Redirect to Oura OAuth login
+- `GET /` - Dashboard
+- `GET /health` - Health check
+- `GET /auth/login` - Redirect to OAuth login
 - `GET /auth/callback` - OAuth callback handler
 - `GET /auth/status` - Check authentication status
-- `GET /heartrate` - Get heart rate data (supports `start_date` and `end_date` query params)
+- `GET /analytics/sleep` - Get sleep analytics
+- `GET /analytics/heartrate` - Get heart rate analytics
+- `GET /raw/oura/heartrate` - Get raw heart rate data from Oura
+- `GET /raw/oura/sleep` - Get raw sleep data from Oura
