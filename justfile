@@ -12,7 +12,8 @@ run:
 
 # Run with real user data (requires auth)
 run-user:
-    DATA_SOURCE=user uv run uvicorn app.main:app --reload
+    echo "Login at https://${CODESPACE_NAME}-8000.app.github.dev/auth/login"
+    DATA_SOURCE=user uv run uvicorn app.main:app --reload --port 8000
 
 # Run tests
 test:
@@ -21,3 +22,8 @@ test:
 # Clean all downloaded sandbox data (preserves .gitkeep)
 clean:
     find tests/fixtures -name '*.json' -type f -delete
+
+playground-my-data:
+    echo "Must run just run-user first & auth."
+    curl http://localhost:8000/raw/oura/heartrate | jq >  ./playground/user_data/heartrate.json
+    curl http://localhost:8000/raw/oura/sleep | jq > ./playground/user_data/sleep.json
