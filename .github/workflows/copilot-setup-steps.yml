@@ -26,18 +26,26 @@ jobs:
 
           # Wait for the server to be ready
           echo "Waiting for server to start..."
+          SERVER_READY=false
           for i in {1..30}; do
             if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
               echo "Server is ready!"
+              SERVER_READY=true
               break
             fi
             sleep 1
           done
 
+          if [ "$SERVER_READY" = false ]; then
+            echo "Server failed to start within 30 seconds"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
           # Warm up cache by hitting both raw data endpoints
           echo "Warming up cache..."
-          curl -s http://127.0.0.1:8000/raw/oura/heartrate
-          curl -s http://127.0.0.1:8000/raw/oura/sleep
+          curl -sf http://127.0.0.1:8000/raw/oura/heartrate > /dev/null || { echo "Failed to warm up heartrate cache"; kill $SERVER_PID 2>/dev/null || true; exit 1; }
+          curl -sf http://127.0.0.1:8000/raw/oura/sleep > /dev/null || { echo "Failed to warm up sleep cache"; kill $SERVER_PID 2>/dev/null || true; exit 1; }
 
           # Stop the server
           kill $SERVER_PID 2>/dev/null || true
