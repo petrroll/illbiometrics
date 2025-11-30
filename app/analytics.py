@@ -6,7 +6,7 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-from app.oura_client import SleepData
+from app.oura_client import SleepData, HeartRateData
 
 
 @dataclass
@@ -21,6 +21,29 @@ class SleepAnalytics:
     hr_80th_percentile: float
     hrv_20th_percentile: float
     hrv_80th_percentile: float
+
+
+@dataclass
+class HeartRateAnalytics:
+    """Heart rate analytics results (aggregated across all days)."""
+    start_date: Optional[date]
+    end_date: Optional[date]
+    average_hr: float
+    hr_20th_percentile: float
+    hr_50th_percentile: float
+    hr_80th_percentile: float
+    hr_95th_percentile: float
+
+
+@dataclass
+class DailyHeartRateAnalytics:
+    """Heart rate analytics for a single day."""
+    day: date
+    average_hr: float
+    hr_20th_percentile: float
+    hr_50th_percentile: float
+    hr_80th_percentile: float
+    hr_95th_percentile: float
 
 
 def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
@@ -84,3 +107,84 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
         hrv_20th_percentile=float(round(np.percentile(hrv_arr, 20), 1)),
         hrv_80th_percentile=float(round(np.percentile(hrv_arr, 80), 1)),
     )
+
+
+def oura_heartrate_to_dataframe(heartrate_data: HeartRateData) -> pd.DataFrame:
+    """Convert Oura heart rate API response to DataFrame."""
+    records = []
+    for sample in heartrate_data.data:
+        records.append({
+            "bpm": sample.bpm,
+            "source": sample.source,
+            "timestamp": sample.timestamp,
+        })
+    df = pd.DataFrame(records)
+    if not df.empty:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["day"] = df["timestamp"].dt.date
+    return df
+
+
+def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
+    """Compute aggregate heart rate analytics from DataFrame (wake heart rate only)."""
+    # Filter to awake source only
+    if not df.empty:
+        wake_df = df[df["source"] == "awake"]
+    else:
+        wake_df = df
+    
+    # Get actual date range from the data
+    if not wake_df.empty:
+        min_day = wake_df["day"].min()
+        max_day = wake_df["day"].max()
+        actual_start: date | None = date(min_day.year, min_day.month, min_day.day)
+        actual_end: date | None = date(max_day.year, max_day.month, max_day.day)
+        hr_values = np.array(wake_df["bpm"].tolist())
+    else:
+        actual_start = None
+        actual_end = None
+        hr_values = np.array([0])
+
+    average_hr = float(np.mean(hr_values)) if len(hr_values) > 0 else 0.0
+
+    return HeartRateAnalytics(
+        start_date=actual_start,
+        end_date=actual_end,
+        average_hr=float(round(average_hr, 1)),
+        hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
+        hr_50th_percentile=float(round(np.percentile(hr_values, 50), 1)),
+        hr_80th_percentile=float(round(np.percentile(hr_values, 80), 1)),
+        hr_95th_percentile=float(round(np.percentile(hr_values, 95), 1)),
+    )
+
+
+def analyze_heart_rate_daily(df: pd.DataFrame) -> list[DailyHeartRateAnalytics]:
+    """Compute daily heart rate analytics from DataFrame (wake heart rate only)."""
+    if df.empty:
+        return []
+    
+    # Filter to awake source only
+    wake_df = df[df["source"] == "awake"]
+    
+    if wake_df.empty:
+        return []
+    
+    results: list[DailyHeartRateAnalytics] = []
+    for day, group in wake_df.groupby("day"):
+        hr_values = np.array(group["bpm"].tolist())
+        if len(hr_values) == 0:
+            continue
+        
+        results.append(DailyHeartRateAnalytics(
+            day=date(day.year, day.month, day.day),  # type: ignore[union-attr]
+            average_hr=float(round(np.mean(hr_values), 1)),
+            hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
+            hr_50th_percentile=float(round(np.percentile(hr_values, 50), 1)),
+            hr_80th_percentile=float(round(np.percentile(hr_values, 80), 1)),
+            hr_95th_percentile=float(round(np.percentile(hr_values, 95), 1)),
+        ))
+    
+    # Sort by day
+    results.sort(key=lambda x: x.day)
+    return results
+

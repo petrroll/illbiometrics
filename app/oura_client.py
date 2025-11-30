@@ -202,7 +202,7 @@ class OuraClient:
         """
         Fetch heart rate data from Oura API.
         
-        By default, fetches data from last night (yesterday to today).
+        By default, fetches last 30 days of data.
         
         Args:
             start_date: Start date for data range
@@ -218,7 +218,7 @@ class OuraClient:
         if end_date is None:
             end_date = date.today()
         if start_date is None:
-            start_date = end_date - timedelta(days=1)
+            start_date = end_date - timedelta(days=30)
         
         cache_endpoint = "usercollection_heartrate"
         

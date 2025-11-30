@@ -8,7 +8,13 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.auth import router as auth_router, get_stored_token
 from app.oura_client import OuraClient, DataSource, NotAuthenticatedError
-from app.analytics import oura_sleep_to_dataframe, analyze_sleep
+from app.analytics import (
+    oura_sleep_to_dataframe,
+    analyze_sleep,
+    oura_heartrate_to_dataframe,
+    analyze_heart_rate,
+    analyze_heart_rate_daily,
+)
 
 # Global client instance, initialized at startup
 oura_client: OuraClient | None = None
@@ -72,38 +78,6 @@ async def root():
     }
 
 
-@app.get("/heartrate")
-async def heartrate(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to yesterday"),
-    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
-):
-    """
-    Get heart rate data from Oura.
-    
-    By default, returns data from last night (yesterday to today).
-    Data source is configured at application startup via --data-source flag.
-    """
-    if oura_client is None:
-        raise HTTPException(status_code=500, detail="Client not initialized")
-    
-    try:
-        data, actual_start, actual_end = await oura_client.get_heartrate_data(
-            start_date, end_date
-        )
-        return {
-            "data_source": oura_client.data_source.value,
-            "start_date": str(actual_start),
-            "end_date": str(actual_end),
-            "data": [{"bpm": s.bpm, "source": s.source, "timestamp": s.timestamp} for s in data.data],
-        }
-    except NotAuthenticatedError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/analytics/sleep")
 async def sleep_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
@@ -135,6 +109,90 @@ async def sleep_analytics(
             "hr_80th_percentile": analytics.hr_80th_percentile,
             "hrv_20th_percentile": analytics.hrv_20th_percentile,
             "hrv_80th_percentile": analytics.hrv_80th_percentile,
+        }
+    except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analytics/heartrate")
+async def heartrate_analytics(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get aggregate heart rate analytics.
+    
+    Returns average wake heart rate, and p20, p50, p80, p95 percentiles
+    across all days in the date range.
+    Data source is configured at application startup via --data-source flag.
+    """
+    if oura_client is None:
+        raise HTTPException(status_code=500, detail="Client not initialized")
+    
+    try:
+        heartrate_data, actual_start, actual_end = await oura_client.get_heartrate_data(
+            start_date, end_date
+        )
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        analytics = analyze_heart_rate(df)
+        return {
+            "data_source": oura_client.data_source.value,
+            "start_date": str(analytics.start_date) if analytics.start_date else None,
+            "end_date": str(analytics.end_date) if analytics.end_date else None,
+            "average_hr": analytics.average_hr,
+            "hr_20th_percentile": analytics.hr_20th_percentile,
+            "hr_50th_percentile": analytics.hr_50th_percentile,
+            "hr_80th_percentile": analytics.hr_80th_percentile,
+            "hr_95th_percentile": analytics.hr_95th_percentile,
+        }
+    except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analytics/heart-rate-daily")
+async def heartrate_daily_analytics(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get daily heart rate analytics.
+    
+    Returns average wake heart rate and p20, p50, p80, p95 percentiles
+    for each day in the date range.
+    Data source is configured at application startup via --data-source flag.
+    """
+    if oura_client is None:
+        raise HTTPException(status_code=500, detail="Client not initialized")
+    
+    try:
+        heartrate_data, actual_start, actual_end = await oura_client.get_heartrate_data(
+            start_date, end_date
+        )
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        daily_analytics = analyze_heart_rate_daily(df)
+        return {
+            "data_source": oura_client.data_source.value,
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "days": [
+                {
+                    "day": str(day.day),
+                    "average_hr": day.average_hr,
+                    "hr_20th_percentile": day.hr_20th_percentile,
+                    "hr_50th_percentile": day.hr_50th_percentile,
+                    "hr_80th_percentile": day.hr_80th_percentile,
+                    "hr_95th_percentile": day.hr_95th_percentile,
+                }
+                for day in daily_analytics
+            ],
         }
     except NotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))
