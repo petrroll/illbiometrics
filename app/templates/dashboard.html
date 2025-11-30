@@ -65,25 +65,28 @@
                     </button>
                 </div>
                 <div id="sleepDateRange" class="text-sm text-gray-500 mb-4"></div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div class="bg-blue-50 rounded p-4 text-center">
                         <div class="text-2xl font-bold text-blue-700" id="sleepDuration">-</div>
+                        <div class="text-xs text-blue-500" id="sleepDurationStd">-</div>
                         <div class="text-sm text-gray-600">Median Sleep</div>
                     </div>
                     <div class="bg-red-50 rounded p-4 text-center">
                         <div class="text-2xl font-bold text-red-700" id="sleepHr">-</div>
+                        <div class="text-xs text-red-500" id="sleepHrStd">-</div>
                         <div class="text-sm text-gray-600">Median HR</div>
                     </div>
                     <div class="bg-green-50 rounded p-4 text-center">
                         <div class="text-2xl font-bold text-green-700" id="sleepHrv">-</div>
+                        <div class="text-xs text-green-500" id="sleepHrvStd">-</div>
                         <div class="text-sm text-gray-600">Median HRV</div>
-                    </div>
-                    <div class="bg-purple-50 rounded p-4 text-center">
-                        <div class="text-lg font-bold text-purple-700" id="sleepHrRange">-</div>
-                        <div class="text-sm text-gray-600">HR (p20-p80)</div>
                     </div>
                 </div>
                 <div class="mt-4 grid grid-cols-2 gap-4">
+                    <div class="bg-purple-50 rounded p-3 text-center">
+                        <div class="text-lg font-semibold text-purple-700" id="sleepHrRange">-</div>
+                        <div class="text-sm text-gray-600">HR (p20-p80)</div>
+                    </div>
                     <div class="bg-gray-50 rounded p-3 text-center">
                         <div class="text-lg font-semibold text-gray-700" id="sleepHrvRange">-</div>
                         <div class="text-sm text-gray-600">HRV (p20-p80)</div>
@@ -107,6 +110,7 @@
                 <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
                     <div class="bg-red-50 rounded p-4 text-center">
                         <div class="text-2xl font-bold text-red-700" id="hrAvg">-</div>
+                        <div class="text-xs text-red-500" id="hrAvgStd">-</div>
                         <div class="text-sm text-gray-600">Average HR</div>
                     </div>
                     <div class="bg-blue-50 rounded p-4 text-center">
@@ -223,8 +227,11 @@
                 document.getElementById('sleepDateRange').textContent = 
                     `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source})`;
                 document.getElementById('sleepDuration').textContent = formatDuration(sleepData.median_sleep_duration);
+                document.getElementById('sleepDurationStd').textContent = '±' + formatDuration(sleepData.sleep_duration_std);
                 document.getElementById('sleepHr').textContent = formatNumber(sleepData.median_avg_hr) + ' bpm';
+                document.getElementById('sleepHrStd').textContent = '±' + formatNumber(sleepData.avg_hr_std) + ' bpm';
                 document.getElementById('sleepHrv').textContent = formatNumber(sleepData.median_avg_hrv) + ' ms';
+                document.getElementById('sleepHrvStd').textContent = '±' + formatNumber(sleepData.avg_hrv_std) + ' ms';
                 document.getElementById('sleepHrRange').textContent = 
                     formatNumber(sleepData.hr_20th_percentile) + ' - ' + formatNumber(sleepData.hr_80th_percentile) + ' bpm';
                 document.getElementById('sleepHrvRange').textContent = 
@@ -234,6 +241,7 @@
                 document.getElementById('hrDateRange').textContent = 
                     `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source})`;
                 document.getElementById('hrAvg').textContent = formatNumber(hrData.average_hr) + ' bpm';
+                document.getElementById('hrAvgStd').textContent = '±' + formatNumber(hrData.average_hr_std) + ' bpm';
                 document.getElementById('hrP20').textContent = formatNumber(hrData.hr_20th_percentile);
                 document.getElementById('hrP50').textContent = formatNumber(hrData.hr_50th_percentile);
                 document.getElementById('hrP80').textContent = formatNumber(hrData.hr_80th_percentile);
