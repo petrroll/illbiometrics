@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.122.0",
+    "garth>=0.5.19",
     "httpx>=0.28.1",
     "matplotlib>=3.10.7",
     "numpy>=2.0.0",
