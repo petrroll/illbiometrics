@@ -15,7 +15,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def sleep_fixture_data() -> dict:
     """Load the sleep fixture data."""
-    with open(FIXTURES_DIR / "usercollection_sleep.json") as f:
+    with open(FIXTURES_DIR / "usercollection_sleep_2025-10-31_2025-11-29.json") as f:
         return json.load(f)
 
 

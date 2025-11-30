@@ -1,4 +1,10 @@
 {
+  "_metadata": {
+    "endpoint": "usercollection/sleep",
+    "start_date": "2025-10-31",
+    "end_date": "2025-11-29",
+    "fetched_at": "2025-11-30T13:57:15Z"
+  },
   "data": [
     {
       "id": "sleep-0-2025-10-31",

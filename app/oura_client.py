@@ -89,27 +89,44 @@ def _parse_sleep_data(data: dict) -> SleepData:
     )
 
 
-def _get_cache_path(endpoint: str) -> Path:
-    """Get the cache file path for a sandbox endpoint."""
+def _get_sandbox_cache_path(endpoint: str, start_date: date, end_date: date) -> Path:
+    """Get the cache file path for a sandbox endpoint and date range."""
     safe_name = endpoint.replace("/", "_").strip("_")
-    return SANDBOX_CACHE_DIR / f"{safe_name}.json"
+    return SANDBOX_CACHE_DIR / f"{safe_name}_{start_date}_{end_date}.json"
 
 
-def _load_from_cache(endpoint: str) -> Optional[dict]:
-    """Load data from cache file."""
-    cache_path = _get_cache_path(endpoint)
+def _load_from_sandbox_cache(endpoint: str, start_date: date, end_date: date) -> Optional[dict]:
+    """Load data from sandbox cache file for the given date range, excluding metadata."""
+    cache_path = _get_sandbox_cache_path(endpoint, start_date, end_date)
     if cache_path.exists():
         with open(cache_path, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            # Remove metadata before returning (it's for human readability only)
+            data.pop("_metadata", None)
+            return data
     return None
 
 
-def _save_to_cache(endpoint: str, data: dict) -> None:
-    """Save data to cache file."""
-    cache_path = _get_cache_path(endpoint)
+def _save_to_sandbox_cache(endpoint: str, data: dict, start_date: date, end_date: date) -> None:
+    """Save data to sandbox cache file with metadata."""
+    from datetime import datetime, timezone
+    
+    cache_path = _get_sandbox_cache_path(endpoint, start_date, end_date)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Add metadata to the cached data
+    cache_data = {
+        "_metadata": {
+            "endpoint": endpoint.replace("_", "/"),
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+        **data,
+    }
+    
     with open(cache_path, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(cache_data, f, indent=2)
 
 
 class OuraClient:
@@ -207,7 +224,7 @@ class OuraClient:
         
         # For sandbox mode, try cache first
         if self._data_source == DataSource.SANDBOX:
-            cached = _load_from_cache(cache_endpoint)
+            cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
             if cached is not None:
                 samples = [
                     HeartRateSample(
@@ -234,7 +251,7 @@ class OuraClient:
             
             # Cache sandbox data
             if self._data_source == DataSource.SANDBOX:
-                _save_to_cache(cache_endpoint, json_data)
+                _save_to_sandbox_cache(cache_endpoint, json_data, start_date, end_date)
             
             samples = [
                 HeartRateSample(
@@ -277,7 +294,7 @@ class OuraClient:
         
         # For sandbox mode, try cache first
         if self._data_source == DataSource.SANDBOX:
-            cached = _load_from_cache(cache_endpoint)
+            cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
             if cached is not None:
                 return [_parse_sleep_data(item) for item in cached.get("data", [])], start_date, end_date
         
@@ -295,6 +312,6 @@ class OuraClient:
             
             # Cache sandbox data
             if self._data_source == DataSource.SANDBOX:
-                _save_to_cache(cache_endpoint, json_data)
+                _save_to_sandbox_cache(cache_endpoint, json_data, start_date, end_date)
             
             return [_parse_sleep_data(item) for item in json_data.get("data", [])], start_date, end_date

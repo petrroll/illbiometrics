@@ -17,3 +17,7 @@ run-user:
 # Run tests
 test:
     DATA_SOURCE=sandbox uv run pytest tests/ -v
+
+# Clean all downloaded sandbox data (preserves .gitkeep)
+clean:
+    find tests/fixtures -name '*.json' -type f -delete
