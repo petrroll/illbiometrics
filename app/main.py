@@ -200,3 +200,86 @@ async def heartrate_daily_analytics(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/raw/oura/heartrate")
+async def raw_heartrate(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get raw heart rate data from Oura.
+    
+    Returns all heart rate samples in the date range.
+    Data source is configured at application startup via --data-source flag.
+    """
+    if oura_client is None:
+        raise HTTPException(status_code=500, detail="Client not initialized")
+    
+    try:
+        data, actual_start, actual_end = await oura_client.get_heartrate_data(
+            start_date, end_date
+        )
+        return {
+            "data_source": oura_client.data_source.value,
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "data": [{"bpm": s.bpm, "source": s.source, "timestamp": s.timestamp} for s in data.data],
+        }
+    except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/raw/oura/sleep")
+async def raw_sleep(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get raw sleep data from Oura.
+    
+    Returns all sleep records in the date range.
+    Data source is configured at application startup via --data-source flag.
+    """
+    if oura_client is None:
+        raise HTTPException(status_code=500, detail="Client not initialized")
+    
+    try:
+        sleep_data, actual_start, actual_end = await oura_client.get_sleep_data(
+            start_date, end_date
+        )
+        return {
+            "data_source": oura_client.data_source.value,
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "data": [
+                {
+                    "id": s.id,
+                    "day": s.day,
+                    "total_sleep_duration": s.total_sleep_duration,
+                    "average_heart_rate": s.average_heart_rate,
+                    "average_hrv": s.average_hrv,
+                    "heart_rate": {
+                        "interval": s.heart_rate.interval,
+                        "items": s.heart_rate.items,
+                        "timestamp": s.heart_rate.timestamp,
+                    } if s.heart_rate else None,
+                    "hrv": {
+                        "interval": s.hrv.interval,
+                        "items": s.hrv.items,
+                        "timestamp": s.hrv.timestamp,
+                    } if s.hrv else None,
+                }
+                for s in sleep_data
+            ],
+        }
+    except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
