@@ -1,4 +1,3 @@
-- Sleep data contains short sleeps ?naps? filter out for analysis
 - Handle no data / short data correctly 
 - Add garmin support with https://github.com/cyberjunky/python-garminconnect / https://github.com/matin/garth / wait for official developer registration
 
