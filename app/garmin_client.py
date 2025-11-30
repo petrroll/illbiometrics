@@ -69,6 +69,13 @@ GarthTokenSetter = Callable[[str, dict], None]
 SandboxDataGetter = Callable[[str, str, date, date], Optional[list[dict]]]
 
 
+def _parse_calendar_date(value: str | date) -> date:
+    """Parse a calendar date value that may be string or date object."""
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    return value
+
+
 class GarminClient:
     """
     Garmin API client using the garth library.
@@ -214,9 +221,8 @@ class GarminClient:
     def _parse_hrv_data(self, data: dict) -> SleepHRVData:
         """Parse raw HRV data dict into SleepHRVData."""
         baseline = data.get("baseline", {})
-        cal_date = data["calendar_date"]
         return SleepHRVData(
-            calendar_date=date.fromisoformat(cal_date) if isinstance(cal_date, str) else cal_date,
+            calendar_date=_parse_calendar_date(data["calendar_date"]),
             weekly_avg=data.get("weekly_avg"),
             last_night_avg=data.get("last_night_avg"),
             last_night_5_min_high=data.get("last_night_5_min_high"),
@@ -283,9 +289,8 @@ class GarminClient:
     
     def _parse_stress_data(self, data: dict) -> StressData:
         """Parse raw stress data dict into StressData."""
-        cal_date = data["calendar_date"]
         return StressData(
-            calendar_date=date.fromisoformat(cal_date) if isinstance(cal_date, str) else cal_date,
+            calendar_date=_parse_calendar_date(data["calendar_date"]),
             overall_stress_level=data.get("overall_stress_level", 0),
             rest_stress_duration=data.get("rest_stress_duration"),
             low_stress_duration=data.get("low_stress_duration"),
@@ -353,9 +358,8 @@ class GarminClient:
     
     def _parse_sleep_data(self, data: dict) -> DailySleepData:
         """Parse raw sleep data dict into DailySleepData."""
-        cal_date = data["calendar_date"]
         return DailySleepData(
-            calendar_date=date.fromisoformat(cal_date) if isinstance(cal_date, str) else cal_date,
+            calendar_date=_parse_calendar_date(data["calendar_date"]),
             sleep_time_seconds=data.get("sleep_time_seconds", 0),
             deep_sleep_seconds=data.get("deep_sleep_seconds"),
             light_sleep_seconds=data.get("light_sleep_seconds"),
