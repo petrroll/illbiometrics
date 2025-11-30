@@ -60,9 +60,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Oura Biometrics API",
-    description="API for accessing Oura ring biometric data",
+    description="""
+## Oura Biometrics API
+
+API for accessing and analyzing Oura ring biometric data.
+
+### Features
+- **Sleep Analytics**: Get sleep duration, HR, HRV statistics and percentiles
+- **Heart Rate Analytics**: Analyze heart rate data with daily and detailed breakdowns
+- **OAuth Authentication**: Secure authentication with Oura API
+
+### Data Sources
+Configure via `--data-source` flag or `DATA_SOURCE` environment variable:
+- `user`: Your personal Oura data (requires authentication)
+- `sandbox`: Cached sandbox data for testing
+    """,
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc",  # ReDoc
+    openapi_url="/openapi.json",  # OpenAPI schema
 )
 
 app.include_router(auth_router)
