@@ -34,7 +34,7 @@ async def login():
         "response_type": "code",
         "client_id": OURA_CLIENT_ID,
         "redirect_uri": OURA_REDIRECT_URI,
-        "scope": "heartrate",
+        "scope": "heartrate daily sleep",
     }
     auth_url = f"{OURA_AUTH_URL}?{urlencode(params)}"
     return RedirectResponse(url=auth_url)
