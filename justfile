@@ -1,6 +1,10 @@
 # Default recipe
 default: build
 
+# Install dependencies
+install:
+    uv sync
+
 # Prepare environment and run type checks
 build:
     uv sync

@@ -1,0 +1,54 @@
+name: "Copilot Setup Steps"
+
+on: workflow_dispatch
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install dependencies
+        run: just install
+
+      - name: Start server and warm up cache
+        run: |
+          # Start the server with sandbox data source in the background
+          DATA_SOURCE=sandbox uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          SERVER_PID=$!
+
+          # Wait for the server to be ready
+          echo "Waiting for server to start..."
+          SERVER_READY=false
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              SERVER_READY=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$SERVER_READY" = false ]; then
+            echo "Server failed to start within 30 seconds"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # Warm up cache by hitting both raw data endpoints
+          echo "Warming up cache..."
+          curl -sf http://127.0.0.1:8000/raw/oura/heartrate > /dev/null || { echo "Failed to warm up heartrate cache"; kill $SERVER_PID 2>/dev/null || true; exit 1; }
+          curl -sf http://127.0.0.1:8000/raw/oura/sleep > /dev/null || { echo "Failed to warm up sleep cache"; kill $SERVER_PID 2>/dev/null || true; exit 1; }
+
+          # Stop the server
+          kill $SERVER_PID 2>/dev/null || true
+          echo "Cache warmup complete!"
