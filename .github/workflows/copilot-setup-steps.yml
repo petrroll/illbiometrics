@@ -1,0 +1,44 @@
+name: "Copilot Setup Steps"
+
+on: workflow_dispatch
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install dependencies
+        run: just install
+
+      - name: Start server and warm up cache
+        run: |
+          # Start the server with sandbox data source in the background
+          DATA_SOURCE=sandbox uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          SERVER_PID=$!
+
+          # Wait for the server to be ready
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            sleep 1
+          done
+
+          # Warm up cache by hitting both raw data endpoints
+          echo "Warming up cache..."
+          curl -s http://127.0.0.1:8000/raw/oura/heartrate
+          curl -s http://127.0.0.1:8000/raw/oura/sleep
+
+          # Stop the server
+          kill $SERVER_PID 2>/dev/null || true
+          echo "Cache warmup complete!"
