@@ -186,6 +186,69 @@ class TestAnalyzeSleep:
         assert result.hr_20th_percentile > 0
         assert result.hrv_20th_percentile > 0
 
+    def test_computes_sleep_duration_std(self, sleep_data_list: list[dict]):
+        """Test that standard deviation of sleep duration is computed."""
+        sleep_records = [_parse_sleep_data(record) for record in sleep_data_list]
+        df = oura_sleep_to_dataframe(sleep_records)
+        
+        result = analyze_sleep(df)
+        
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_std = filtered_df["total_sleep_duration"].std()
+        assert result.sleep_duration_std == round(expected_std, 2)
+        # Std should be non-negative
+        assert result.sleep_duration_std >= 0
+
+    def test_computes_avg_hr_std(self, sleep_data_list: list[dict]):
+        """Test that standard deviation of average HR is computed."""
+        sleep_records = [_parse_sleep_data(record) for record in sleep_data_list]
+        df = oura_sleep_to_dataframe(sleep_records)
+        
+        result = analyze_sleep(df)
+        
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_std = filtered_df["average_heart_rate"].std()
+        assert result.avg_hr_std == round(expected_std, 1)
+        # Std should be non-negative
+        assert result.avg_hr_std >= 0
+
+    def test_computes_avg_hrv_std(self, sleep_data_list: list[dict]):
+        """Test that standard deviation of average HRV is computed."""
+        sleep_records = [_parse_sleep_data(record) for record in sleep_data_list]
+        df = oura_sleep_to_dataframe(sleep_records)
+        
+        result = analyze_sleep(df)
+        
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_std = filtered_df["average_hrv"].std()
+        assert result.avg_hrv_std == round(expected_std, 1)
+        # Std should be non-negative
+        assert result.avg_hrv_std >= 0
+
+    def test_handles_single_record_std(self):
+        """Test that std returns 0 when there's only a single record (no variance possible)."""
+        sleep_data = SleepData(
+            id="test-1",
+            day="2025-01-01",
+            type="long_sleep",
+            total_sleep_duration=28800,
+            average_heart_rate=60.0,
+            average_hrv=50,
+            heart_rate=None,
+            hrv=None,
+        )
+        df = oura_sleep_to_dataframe([sleep_data])
+        
+        result = analyze_sleep(df)
+        
+        # With only one record, std should be 0 (pandas returns NaN, but we convert to 0)
+        assert result.sleep_duration_std == 0.0
+        assert result.avg_hr_std == 0.0
+        assert result.avg_hrv_std == 0.0
+
 
 class TestOuraHeartrateToDataframe:
     """Tests for oura_heartrate_to_dataframe function."""
@@ -333,6 +396,35 @@ class TestAnalyzeHeartRate:
         # No active data, should return None dates
         assert result.start_date is None
         assert result.end_date is None
+
+    def test_computes_average_hr_std(self, heartrate_data_list: list[dict]):
+        """Test that standard deviation of heart rate is computed."""
+        samples = [
+            HeartRateSample(
+                bpm=item["bpm"],
+                source=item["source"],
+                timestamp=item["timestamp"],
+            )
+            for item in heartrate_data_list
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate(df)
+        
+        # Std should be non-negative
+        assert result.average_hr_std >= 0
+        # For realistic data, std should be greater than 0 (there's variation)
+        assert result.average_hr_std > 0
+
+    def test_handles_empty_data_std(self):
+        """Test that empty data returns 0 for standard deviation."""
+        heartrate_data = HeartRateData(data=[])
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate(df)
+        
+        assert result.average_hr_std == 0.0
 
 
 class TestAnalyzeHeartRateDaily:

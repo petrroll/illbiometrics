@@ -25,8 +25,11 @@ class SleepAnalytics:
     start_date: Optional[date]
     end_date: Optional[date]
     median_sleep_duration: float
+    sleep_duration_std: float
     median_avg_hr: float
+    avg_hr_std: float
     median_avg_hrv: float
+    avg_hrv_std: float
     hr_20th_percentile: float
     hr_80th_percentile: float
     hrv_20th_percentile: float
@@ -39,6 +42,7 @@ class HeartRateAnalytics:
     start_date: Optional[date]
     end_date: Optional[date]
     average_hr: float
+    average_hr_std: float
     hr_20th_percentile: float
     hr_50th_percentile: float
     hr_80th_percentile: float
@@ -108,10 +112,13 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
 
     # Median sleep duration (convert seconds to hours)
     median_duration = df["total_sleep_duration"].median()
+    sleep_duration_std = df["total_sleep_duration"].std()
 
     # Median of average HR and HRV
     median_avg_hr = df["average_heart_rate"].median()
+    avg_hr_std = df["average_heart_rate"].std()
     median_avg_hrv = df["average_hrv"].median()
+    avg_hrv_std = df["average_hrv"].std()
 
     # Flatten all HR samples for global percentiles
     all_hr = []
@@ -131,9 +138,12 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
     return SleepAnalytics(
         start_date=actual_start,
         end_date=actual_end,
-        median_sleep_duration=float(round(median_duration, 2)),
-        median_avg_hr=float(round(median_avg_hr, 1)),
-        median_avg_hrv=float(round(median_avg_hrv, 1)),
+        median_sleep_duration=float(round(median_duration, 2)) if not np.isnan(median_duration) else 0.0,
+        sleep_duration_std=float(round(sleep_duration_std, 2)) if not np.isnan(sleep_duration_std) else 0.0,
+        median_avg_hr=float(round(median_avg_hr, 1)) if not np.isnan(median_avg_hr) else 0.0,
+        avg_hr_std=float(round(avg_hr_std, 1)) if not np.isnan(avg_hr_std) else 0.0,
+        median_avg_hrv=float(round(median_avg_hrv, 1)) if not np.isnan(median_avg_hrv) else 0.0,
+        avg_hrv_std=float(round(avg_hrv_std, 1)) if not np.isnan(avg_hrv_std) else 0.0,
         hr_20th_percentile=float(round(np.percentile(hr_arr, 20), 1)),
         hr_80th_percentile=float(round(np.percentile(hr_arr, 80), 1)),
         hrv_20th_percentile=float(round(np.percentile(hrv_arr, 20), 1)),
@@ -255,11 +265,13 @@ def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
         hr_values = np.array([0])
 
     average_hr = float(np.mean(hr_values)) if len(hr_values) > 0 else 0.0
+    average_hr_std = float(np.std(hr_values)) if len(hr_values) > 0 else 0.0
 
     return HeartRateAnalytics(
         start_date=actual_start,
         end_date=actual_end,
         average_hr=float(round(average_hr, 1)),
+        average_hr_std=float(round(average_hr_std, 1)),
         hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
         hr_50th_percentile=float(round(np.percentile(hr_values, 50), 1)),
         hr_80th_percentile=float(round(np.percentile(hr_values, 80), 1)),

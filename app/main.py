@@ -120,7 +120,7 @@ async def sleep_analytics(
     """
     Get sleep analytics.
     
-    Returns median sleep duration, HR, HRV, and percentiles.
+    Returns median sleep duration, HR, HRV, percentiles, and variability (standard deviation).
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
@@ -136,8 +136,11 @@ async def sleep_analytics(
             "start_date": str(analytics.start_date) if analytics.start_date else None,
             "end_date": str(analytics.end_date) if analytics.end_date else None,
             "median_sleep_duration": analytics.median_sleep_duration,
+            "sleep_duration_std": analytics.sleep_duration_std,
             "median_avg_hr": analytics.median_avg_hr,
+            "avg_hr_std": analytics.avg_hr_std,
             "median_avg_hrv": analytics.median_avg_hrv,
+            "avg_hrv_std": analytics.avg_hrv_std,
             "hr_20th_percentile": analytics.hr_20th_percentile,
             "hr_80th_percentile": analytics.hr_80th_percentile,
             "hrv_20th_percentile": analytics.hrv_20th_percentile,
@@ -159,7 +162,7 @@ async def heartrate_analytics(
     """
     Get aggregate non-sleep heart rate analytics.
     
-    Returns average heart rate and p20, p50, p80, p95, p99 percentiles
+    Returns average heart rate, variability (standard deviation), and p20, p50, p80, p95, p99 percentiles
     across all days in the date range.
     """
     if oura_client is None:
@@ -176,6 +179,7 @@ async def heartrate_analytics(
             "start_date": str(analytics.start_date) if analytics.start_date else None,
             "end_date": str(analytics.end_date) if analytics.end_date else None,
             "average_hr": analytics.average_hr,
+            "average_hr_std": analytics.average_hr_std,
             "hr_20th_percentile": analytics.hr_20th_percentile,
             "hr_50th_percentile": analytics.hr_50th_percentile,
             "hr_80th_percentile": analytics.hr_80th_percentile,
