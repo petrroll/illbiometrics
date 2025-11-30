@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 # Configure logging to match uvicorn's format
@@ -24,6 +24,10 @@ from app.analytics import (
     analyze_heart_rate,
     analyze_heart_rate_daily,
 )
+
+# Create routers for grouping endpoints
+raw_router = APIRouter(prefix="/raw", tags=["raw"])
+analytics_router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # Global client instance, initialized at startup
 oura_client: OuraClient | None = None
@@ -94,11 +98,8 @@ Configure via `--data-source` flag or `DATA_SOURCE` environment variable:
     openapi_url="/openapi.json",  # OpenAPI schema
 )
 
-app.include_router(auth_router)
-
-
-@app.get("/")
-async def root():
+@app.get("/health")
+async def health():
     """Health check endpoint."""
     return {
         "status": "ok",
@@ -107,7 +108,7 @@ async def root():
     }
 
 
-@app.get("/analytics/sleep")
+@analytics_router.get("/sleep")
 async def sleep_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
@@ -146,7 +147,7 @@ async def sleep_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/analytics/heartrate")
+@analytics_router.get("/heartrate")
 async def heartrate_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
@@ -185,7 +186,7 @@ async def heartrate_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/analytics/heart-rate-daily")
+@analytics_router.get("/heart-rate-daily")
 async def heartrate_daily_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
@@ -230,7 +231,7 @@ async def heartrate_daily_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/raw/oura/heartrate")
+@raw_router.get("/oura/heartrate")
 async def raw_heartrate(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
@@ -262,7 +263,7 @@ async def raw_heartrate(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/raw/oura/sleep")
+@raw_router.get("/oura/sleep")
 async def raw_sleep(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
@@ -294,9 +295,13 @@ async def raw_sleep(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
 async def dashboard():
     """
     Display a dashboard with sleep and heart rate analytics.
     """
     return HTMLResponse(content=_dashboard_html)
+
+app.include_router(auth_router)
+app.include_router(raw_router)
+app.include_router(analytics_router)
