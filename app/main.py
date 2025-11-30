@@ -126,8 +126,8 @@ async def sleep_analytics(
         analytics = analyze_sleep(df)
         return {
             "data_source": oura_client.data_source.value,
-            "start_date": str(actual_start),
-            "end_date": str(actual_end),
+            "start_date": str(analytics.start_date) if analytics.start_date else None,
+            "end_date": str(analytics.end_date) if analytics.end_date else None,
             "median_sleep_duration": analytics.median_sleep_duration,
             "median_avg_hr": analytics.median_avg_hr,
             "median_avg_hrv": analytics.median_avg_hrv,

@@ -1,6 +1,8 @@
 """Sleep data analytics module. No external API dependencies."""
 
 from dataclasses import dataclass
+from datetime import date
+from typing import Optional
 import pandas as pd
 import numpy as np
 
@@ -10,6 +12,8 @@ from app.oura_client import SleepData
 @dataclass
 class SleepAnalytics:
     """Sleep analytics results."""
+    start_date: Optional[date]
+    end_date: Optional[date]
     median_sleep_duration: float
     median_avg_hr: float
     median_avg_hrv: float
@@ -38,6 +42,15 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
 
 def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
     """Compute sleep analytics from DataFrame."""
+    # Get actual date range from the data
+    if not df.empty:
+        dates = pd.to_datetime(df["day"]).dt.date
+        actual_start = dates.min()
+        actual_end = dates.max()
+    else:
+        actual_start = None
+        actual_end = None
+
     # Median sleep duration (convert seconds to hours)
     median_duration = df["total_sleep_duration"].median()
 
@@ -61,6 +74,8 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
     hrv_arr = np.array(all_hrv) if all_hrv else np.array([0])
 
     return SleepAnalytics(
+        start_date=actual_start,
+        end_date=actual_end,
         median_sleep_duration=float(round(median_duration, 2)),
         median_avg_hr=float(round(median_avg_hr, 1)),
         median_avg_hrv=float(round(median_avg_hrv, 1)),

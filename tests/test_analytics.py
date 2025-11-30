@@ -3,6 +3,7 @@
 import pytest
 import pandas as pd
 import numpy as np
+from datetime import date
 
 from app.analytics import oura_sleep_to_dataframe, analyze_sleep, SleepAnalytics
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data
@@ -61,6 +62,10 @@ class TestAnalyzeSleep:
         result = analyze_sleep(df)
         
         assert isinstance(result, SleepAnalytics)
+        # Dates should be extracted from actual data
+        assert result.start_date is not None
+        assert result.end_date is not None
+        assert result.start_date <= result.end_date
 
     def test_computes_median_sleep_duration(self, sleep_data_list: list[dict]):
         """Test that median sleep duration is computed correctly."""
@@ -130,6 +135,9 @@ class TestAnalyzeSleep:
         # Should return 0 for percentiles when no samples
         assert result.hr_20th_percentile == 0.0
         assert result.hr_80th_percentile == 0.0
+        # Date should be extracted from the single record
+        assert result.start_date == date(2025, 1, 1)
+        assert result.end_date == date(2025, 1, 1)
 
     def test_handles_none_values_in_samples(self):
         """Test that None values in HR/HRV samples are filtered out."""
