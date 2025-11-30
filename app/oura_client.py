@@ -4,9 +4,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 import json
+import logging
 import httpx
 
 from app.config import OURA_API_BASE, OURA_SANDBOX_BASE, SANDBOX_CACHE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class DataSource(str, Enum):
@@ -226,6 +229,7 @@ class OuraClient:
         if self._data_source == DataSource.SANDBOX:
             cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
             if cached is not None:
+                logger.info(f"Sandbox cache hit for {cache_endpoint} ({start_date} to {end_date})")
                 samples = [
                     HeartRateSample(
                         bpm=item.get("bpm", 0),
@@ -235,6 +239,8 @@ class OuraClient:
                     for item in cached.get("data", [])
                 ]
                 return HeartRateData(data=samples), start_date, end_date
+            else:
+                logger.info(f"Sandbox cache miss for {cache_endpoint} ({start_date} to {end_date}), fetching from API")
         
         url = f"{self._get_base_url()}/usercollection/heartrate"
         headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}
@@ -246,6 +252,8 @@ class OuraClient:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, headers=headers)
+            if not response.is_success:
+                logger.error(f"Oura API error for heartrate: {response.status_code} - {response.text}")
             response.raise_for_status()
             json_data = response.json()
             
@@ -296,7 +304,10 @@ class OuraClient:
         if self._data_source == DataSource.SANDBOX:
             cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
             if cached is not None:
+                logger.info(f"Sandbox cache hit for {cache_endpoint} ({start_date} to {end_date})")
                 return [_parse_sleep_data(item) for item in cached.get("data", [])], start_date, end_date
+            else:
+                logger.info(f"Sandbox cache miss for {cache_endpoint} ({start_date} to {end_date}), fetching from API")
         
         url = f"{self._get_base_url()}/usercollection/sleep"
         headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}        
@@ -307,6 +318,8 @@ class OuraClient:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, headers=headers)
+            if not response.is_success:
+                logger.error(f"Oura API error for sleep: {response.status_code} - {response.text}")
             response.raise_for_status()
             json_data = response.json()
             

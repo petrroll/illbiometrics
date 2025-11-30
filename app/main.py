@@ -1,10 +1,17 @@
 import argparse
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+
+# Configure logging to match uvicorn's format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
 
 from app.auth import router as auth_router, get_stored_token
 from app.oura_client import OuraClient, DataSource, NotAuthenticatedError
