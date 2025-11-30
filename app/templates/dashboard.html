@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oura Biometrics Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header with Login -->
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Oura Biometrics Dashboard</h1>
+            <div id="authSection">
+                <button id="loginBtn" onclick="window.location.href='/auth/login'" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                    </svg>
+                    Login with Oura
+                </button>
+                <span id="authStatus" class="hidden text-green-600 font-medium flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Connected
+                </span>
+            </div>
+        </div>
+        
+        <!-- Date Range Selector -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-700 mb-4">Date Range</h2>
+            <div class="flex flex-wrap gap-4 items-end">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Start Date</label>
+                    <input type="date" id="startDate" class="border rounded px-3 py-2 text-gray-700">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">End Date</label>
+                    <input type="date" id="endDate" class="border rounded px-3 py-2 text-gray-700">
+                </div>
+                <button onclick="loadData()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium">
+                    Load Data
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+            <p class="text-gray-600 mt-2">Loading...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6"></div>
+
+        <!-- Analytics Cards -->
+        <div id="analytics" class="hidden space-y-6">
+            <!-- Sleep Analytics -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">😴 Sleep Analytics</h2>
+                    <button onclick="toggleRawData('sleepRaw')" class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">
+                        Show Raw Data
+                    </button>
+                </div>
+                <div id="sleepDateRange" class="text-sm text-gray-500 mb-4"></div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-blue-50 rounded p-4 text-center">
+                        <div class="text-2xl font-bold text-blue-700" id="sleepDuration">-</div>
+                        <div class="text-sm text-gray-600">Median Sleep</div>
+                    </div>
+                    <div class="bg-red-50 rounded p-4 text-center">
+                        <div class="text-2xl font-bold text-red-700" id="sleepHr">-</div>
+                        <div class="text-sm text-gray-600">Median HR</div>
+                    </div>
+                    <div class="bg-green-50 rounded p-4 text-center">
+                        <div class="text-2xl font-bold text-green-700" id="sleepHrv">-</div>
+                        <div class="text-sm text-gray-600">Median HRV</div>
+                    </div>
+                    <div class="bg-purple-50 rounded p-4 text-center">
+                        <div class="text-lg font-bold text-purple-700" id="sleepHrRange">-</div>
+                        <div class="text-sm text-gray-600">HR (p20-p80)</div>
+                    </div>
+                </div>
+                <div class="mt-4 grid grid-cols-2 gap-4">
+                    <div class="bg-gray-50 rounded p-3 text-center">
+                        <div class="text-lg font-semibold text-gray-700" id="sleepHrvRange">-</div>
+                        <div class="text-sm text-gray-600">HRV (p20-p80)</div>
+                    </div>
+                </div>
+                <!-- Raw Sleep Data -->
+                <div id="sleepRaw" class="hidden mt-4">
+                    <pre class="bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 text-xs"></pre>
+                </div>
+            </div>
+
+            <!-- Heart Rate Analytics -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">❤️ Heart Rate Analytics</h2>
+                    <button onclick="toggleRawData('hrRaw')" class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">
+                        Show Raw Data
+                    </button>
+                </div>
+                <div id="hrDateRange" class="text-sm text-gray-500 mb-4"></div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div class="bg-red-50 rounded p-4 text-center">
+                        <div class="text-2xl font-bold text-red-700" id="hrAvg">-</div>
+                        <div class="text-sm text-gray-600">Average HR</div>
+                    </div>
+                    <div class="bg-blue-50 rounded p-4 text-center">
+                        <div class="text-xl font-bold text-blue-700" id="hrP20">-</div>
+                        <div class="text-sm text-gray-600">p20</div>
+                    </div>
+                    <div class="bg-green-50 rounded p-4 text-center">
+                        <div class="text-xl font-bold text-green-700" id="hrP50">-</div>
+                        <div class="text-sm text-gray-600">p50</div>
+                    </div>
+                    <div class="bg-yellow-50 rounded p-4 text-center">
+                        <div class="text-xl font-bold text-yellow-700" id="hrP80">-</div>
+                        <div class="text-sm text-gray-600">p80</div>
+                    </div>
+                    <div class="bg-orange-50 rounded p-4 text-center">
+                        <div class="text-xl font-bold text-orange-700" id="hrP95">-</div>
+                        <div class="text-sm text-gray-600">p95</div>
+                    </div>
+                </div>
+                <!-- Raw HR Data -->
+                <div id="hrRaw" class="hidden mt-4">
+                    <pre class="bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 text-xs"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Set default dates (last 30 days)
+        const today = new Date();
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setDate(today.getDate() - 30);
+        
+        document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        document.getElementById('startDate').value = thirtyDaysAgo.toISOString().split('T')[0];
+
+        let rawSleepData = null;
+        let rawHrData = null;
+
+        // Check authentication status
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/auth/status');
+                const data = await response.json();
+                const loginBtn = document.getElementById('loginBtn');
+                const authStatus = document.getElementById('authStatus');
+                
+                if (data.authenticated) {
+                    loginBtn.classList.add('hidden');
+                    authStatus.classList.remove('hidden');
+                } else {
+                    loginBtn.classList.remove('hidden');
+                    authStatus.classList.add('hidden');
+                }
+            } catch (err) {
+                console.error('Failed to check auth status:', err);
+            }
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '-';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.round((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
+        }
+
+        function formatNumber(num, decimals = 1) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            return Number(num).toFixed(decimals);
+        }
+
+        function toggleRawData(elementId) {
+            const el = document.getElementById(elementId);
+            el.classList.toggle('hidden');
+        }
+
+        async function loadData() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('analytics').classList.add('hidden');
+            document.getElementById('error').classList.add('hidden');
+
+            const params = new URLSearchParams();
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+            const queryString = params.toString() ? '?' + params.toString() : '';
+
+            try {
+                // Fetch all data in parallel
+                const [sleepRes, hrRes, rawSleepRes, rawHrRes] = await Promise.all([
+                    fetch('/analytics/sleep' + queryString),
+                    fetch('/analytics/heartrate' + queryString),
+                    fetch('/raw/oura/sleep' + queryString),
+                    fetch('/raw/oura/heartrate' + queryString)
+                ]);
+
+                if (!sleepRes.ok || !hrRes.ok) {
+                    const errorData = await (sleepRes.ok ? hrRes : sleepRes).json();
+                    throw new Error(errorData.detail || 'Failed to fetch data');
+                }
+
+                const sleepData = await sleepRes.json();
+                const hrData = await hrRes.json();
+                rawSleepData = await rawSleepRes.json();
+                rawHrData = await rawHrRes.json();
+
+                // Update Sleep Analytics
+                document.getElementById('sleepDateRange').textContent = 
+                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source})`;
+                document.getElementById('sleepDuration').textContent = formatDuration(sleepData.median_sleep_duration);
+                document.getElementById('sleepHr').textContent = formatNumber(sleepData.median_avg_hr) + ' bpm';
+                document.getElementById('sleepHrv').textContent = formatNumber(sleepData.median_avg_hrv) + ' ms';
+                document.getElementById('sleepHrRange').textContent = 
+                    formatNumber(sleepData.hr_20th_percentile) + ' - ' + formatNumber(sleepData.hr_80th_percentile) + ' bpm';
+                document.getElementById('sleepHrvRange').textContent = 
+                    formatNumber(sleepData.hrv_20th_percentile) + ' - ' + formatNumber(sleepData.hrv_80th_percentile) + ' ms';
+                
+                // Update HR Analytics
+                document.getElementById('hrDateRange').textContent = 
+                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source})`;
+                document.getElementById('hrAvg').textContent = formatNumber(hrData.average_hr) + ' bpm';
+                document.getElementById('hrP20').textContent = formatNumber(hrData.hr_20th_percentile);
+                document.getElementById('hrP50').textContent = formatNumber(hrData.hr_50th_percentile);
+                document.getElementById('hrP80').textContent = formatNumber(hrData.hr_80th_percentile);
+                document.getElementById('hrP95').textContent = formatNumber(hrData.hr_95th_percentile);
+
+                // Update raw data displays
+                document.querySelector('#sleepRaw pre').textContent = JSON.stringify(rawSleepData, null, 2);
+                document.querySelector('#hrRaw pre').textContent = JSON.stringify(rawHrData, null, 2);
+
+                document.getElementById('analytics').classList.remove('hidden');
+            } catch (err) {
+                document.getElementById('error').textContent = 'Error: ' + err.message;
+                document.getElementById('error').classList.remove('hidden');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        // Check auth status and load data on page load
+        checkAuthStatus();
+        loadData();
+    </script>
+</body>
+</html>

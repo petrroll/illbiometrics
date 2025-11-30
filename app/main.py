@@ -3,9 +3,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 # Configure logging to match uvicorn's format
 logging.basicConfig(
@@ -25,6 +27,9 @@ from app.analytics import (
 
 # Global client instance, initialized at startup
 oura_client: OuraClient | None = None
+
+# Pre-load dashboard HTML template
+_dashboard_html: str = (Path(__file__).parent / "templates" / "dashboard.html").read_text()
 
 
 def parse_args() -> argparse.Namespace:
@@ -288,3 +293,11 @@ async def raw_sleep(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """
+    Display a dashboard with sleep and heart rate analytics.
+    """
+    return HTMLResponse(content=_dashboard_html)
