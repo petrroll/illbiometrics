@@ -8,6 +8,9 @@ import numpy as np
 
 from app.oura_client import SleepData, HeartRateData
 
+# Sources considered "active" heart rate (not resting/sleep)
+ACTIVE_HR_SOURCES = {"awake", "live", "workout"}
+
 
 @dataclass
 class SleepAnalytics:
@@ -33,6 +36,7 @@ class HeartRateAnalytics:
     hr_50th_percentile: float
     hr_80th_percentile: float
     hr_95th_percentile: float
+    hr_99th_percentile: float
 
 
 @dataclass
@@ -44,6 +48,7 @@ class DailyHeartRateAnalytics:
     hr_50th_percentile: float
     hr_80th_percentile: float
     hr_95th_percentile: float
+    hr_99th_percentile: float
 
 
 def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
@@ -126,20 +131,23 @@ def oura_heartrate_to_dataframe(heartrate_data: HeartRateData) -> pd.DataFrame:
 
 
 def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
-    """Compute aggregate heart rate analytics from DataFrame (wake heart rate only)."""
-    # Filter to awake source only
+    """Compute aggregate heart rate analytics from DataFrame (active heart rate only).
+    
+    Filters to active sources: awake, live, workout (excludes rest/sleep data).
+    """
+    # Filter to active sources only
     if not df.empty:
-        wake_df = df[df["source"] == "awake"]
+        active_df = df[df["source"].isin(ACTIVE_HR_SOURCES)]
     else:
-        wake_df = df
+        active_df = df
     
     # Get actual date range from the data
-    if not wake_df.empty:
-        min_day = wake_df["day"].min()
-        max_day = wake_df["day"].max()
+    if not active_df.empty:
+        min_day = active_df["day"].min()
+        max_day = active_df["day"].max()
         actual_start: date | None = date(min_day.year, min_day.month, min_day.day)
         actual_end: date | None = date(max_day.year, max_day.month, max_day.day)
-        hr_values = np.array(wake_df["bpm"].tolist())
+        hr_values = np.array(active_df["bpm"].tolist())
     else:
         actual_start = None
         actual_end = None
@@ -155,22 +163,26 @@ def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
         hr_50th_percentile=float(round(np.percentile(hr_values, 50), 1)),
         hr_80th_percentile=float(round(np.percentile(hr_values, 80), 1)),
         hr_95th_percentile=float(round(np.percentile(hr_values, 95), 1)),
+        hr_99th_percentile=float(round(np.percentile(hr_values, 99), 1)),
     )
 
 
 def analyze_heart_rate_daily(df: pd.DataFrame) -> list[DailyHeartRateAnalytics]:
-    """Compute daily heart rate analytics from DataFrame (wake heart rate only)."""
+    """Compute daily heart rate analytics from DataFrame (active heart rate only).
+    
+    Filters to active sources: awake, live, workout (excludes rest/sleep data).
+    """
     if df.empty:
         return []
     
-    # Filter to awake source only
-    wake_df = df[df["source"] == "awake"]
+    # Filter to active sources only
+    active_df = df[df["source"].isin(ACTIVE_HR_SOURCES)]
     
-    if wake_df.empty:
+    if active_df.empty:
         return []
     
     results: list[DailyHeartRateAnalytics] = []
-    for day, group in wake_df.groupby("day"):
+    for day, group in active_df.groupby("day"):
         hr_values = np.array(group["bpm"].tolist())
         if len(hr_values) == 0:
             continue
@@ -182,6 +194,7 @@ def analyze_heart_rate_daily(df: pd.DataFrame) -> list[DailyHeartRateAnalytics]:
             hr_50th_percentile=float(round(np.percentile(hr_values, 50), 1)),
             hr_80th_percentile=float(round(np.percentile(hr_values, 80), 1)),
             hr_95th_percentile=float(round(np.percentile(hr_values, 95), 1)),
+            hr_99th_percentile=float(round(np.percentile(hr_values, 99), 1)),
         ))
     
     # Sort by day

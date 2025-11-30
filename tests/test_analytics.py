@@ -254,8 +254,8 @@ class TestAnalyzeHeartRate:
         assert result.end_date is not None
         assert result.start_date <= result.end_date
 
-    def test_filters_to_awake_source_only(self, heartrate_data_list: list[dict]):
-        """Test that only awake source data is used for analytics."""
+    def test_filters_to_active_sources_only(self, heartrate_data_list: list[dict]):
+        """Test that only active source data (awake, live, workout) is used for analytics."""
         samples = [
             HeartRateSample(
                 bpm=item["bpm"],
@@ -269,9 +269,10 @@ class TestAnalyzeHeartRate:
         
         result = analyze_heart_rate(df)
         
-        # Manually compute expected average from awake samples only
-        awake_samples = [item for item in heartrate_data_list if item["source"] == "awake"]
-        expected_avg = sum(s["bpm"] for s in awake_samples) / len(awake_samples)
+        # Manually compute expected average from active sources only
+        active_sources = {"awake", "live", "workout"}
+        active_samples = [item for item in heartrate_data_list if item["source"] in active_sources]
+        expected_avg = sum(s["bpm"] for s in active_samples) / len(active_samples)
         
         assert result.average_hr == round(expected_avg, 1)
 
@@ -294,6 +295,7 @@ class TestAnalyzeHeartRate:
         assert result.hr_20th_percentile <= result.hr_50th_percentile
         assert result.hr_50th_percentile <= result.hr_80th_percentile
         assert result.hr_80th_percentile <= result.hr_95th_percentile
+        assert result.hr_95th_percentile <= result.hr_99th_percentile
 
     def test_handles_empty_data(self):
         """Test that empty data is handled gracefully."""
@@ -317,7 +319,7 @@ class TestAnalyzeHeartRate:
         
         result = analyze_heart_rate(df)
         
-        # No awake data, should return None dates
+        # No active data, should return None dates
         assert result.start_date is None
         assert result.end_date is None
 
@@ -359,9 +361,10 @@ class TestAnalyzeHeartRateDaily:
         
         result = analyze_heart_rate_daily(df)
         
-        # Get unique awake days from fixture
-        awake_items = [item for item in heartrate_data_list if item["source"] == "awake"]
-        unique_days = set(pd.to_datetime(item["timestamp"]).date() for item in awake_items)
+        # Get unique active days from fixture
+        active_sources = {"awake", "live", "workout"}
+        active_items = [item for item in heartrate_data_list if item["source"] in active_sources]
+        unique_days = set(pd.to_datetime(item["timestamp"]).date() for item in active_items)
         
         assert len(result) == len(unique_days)
 
@@ -385,6 +388,7 @@ class TestAnalyzeHeartRateDaily:
             assert day.hr_20th_percentile <= day.hr_50th_percentile
             assert day.hr_50th_percentile <= day.hr_80th_percentile
             assert day.hr_80th_percentile <= day.hr_95th_percentile
+            assert day.hr_95th_percentile <= day.hr_99th_percentile
 
     def test_results_sorted_by_day(self, heartrate_data_list: list[dict]):
         """Test that results are sorted by day."""
@@ -413,8 +417,8 @@ class TestAnalyzeHeartRateDaily:
         
         assert result == []
 
-    def test_filters_to_awake_source_only(self):
-        """Test that only awake source data is used for daily analytics."""
+    def test_filters_to_active_sources_only(self):
+        """Test that only active source data (awake, live, workout) is used for daily analytics."""
         samples = [
             HeartRateSample(bpm=72, source="awake", timestamp="2025-01-01T08:00:00+00:00"),
             HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T02:00:00+00:00"),
@@ -425,7 +429,7 @@ class TestAnalyzeHeartRateDaily:
         
         result = analyze_heart_rate_daily(df)
         
-        # Only one day with awake data
+        # Only one day with active data
         assert len(result) == 1
         assert result[0].day == date(2025, 1, 1)
         assert result[0].average_hr == 72.0

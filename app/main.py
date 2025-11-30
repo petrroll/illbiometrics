@@ -116,7 +116,6 @@ async def sleep_analytics(
     Get sleep analytics.
     
     Returns median sleep duration, HR, HRV, and percentiles.
-    Data source is configured at application startup via --data-source flag.
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
@@ -153,11 +152,10 @@ async def heartrate_analytics(
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
-    Get aggregate heart rate analytics.
+    Get aggregate non-sleep heart rate analytics.
     
-    Returns average wake heart rate, and p20, p50, p80, p95 percentiles
+    Returns average heart rate and p20, p50, p80, p95, p99 percentiles
     across all days in the date range.
-    Data source is configured at application startup via --data-source flag.
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
@@ -177,6 +175,7 @@ async def heartrate_analytics(
             "hr_50th_percentile": analytics.hr_50th_percentile,
             "hr_80th_percentile": analytics.hr_80th_percentile,
             "hr_95th_percentile": analytics.hr_95th_percentile,
+            "hr_99th_percentile": analytics.hr_99th_percentile,
         }
     except NotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -192,11 +191,10 @@ async def heartrate_daily_analytics(
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
-    Get daily heart rate analytics.
+    Get daily non-sleep heart rate analytics.
     
-    Returns average wake heart rate and p20, p50, p80, p95 percentiles
+    Returns average heart rate and p20, p50, p80, p95, p99 percentiles
     for each day in the date range.
-    Data source is configured at application startup via --data-source flag.
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
@@ -219,6 +217,7 @@ async def heartrate_daily_analytics(
                     "hr_50th_percentile": day.hr_50th_percentile,
                     "hr_80th_percentile": day.hr_80th_percentile,
                     "hr_95th_percentile": day.hr_95th_percentile,
+                    "hr_99th_percentile": day.hr_99th_percentile,
                 }
                 for day in daily_analytics
             ],
