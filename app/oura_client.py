@@ -120,20 +120,23 @@ class OuraClient:
     - USER: Fetches from user's actual data (requires auth)
     - SANDBOX: Uses cached sandbox data if available, otherwise fetches from
                Oura sandbox API and caches the result
+    
+    For USER mode, supports multiple users via client_key which is passed to
+    each public API method and forwarded to the token_getter callback.
     """
     
     def __init__(
         self,
         data_source: DataSource,
-        token_getter: Callable[[], Optional[str]] | None = None,
+        token_getter: Callable[[str], Optional[str]] | None = None,
     ):
         """
         Initialize the client.
         
         Args:
             data_source: Where to fetch data from (user, sandbox, cached)
-            token_getter: A callable that returns the current access token or None
-                         (required for USER data source)
+            token_getter: A callable that takes a client_key and returns the current
+                         access token or None (required for USER data source)
         """
         self._data_source = data_source
         self._token_getter = token_getter
@@ -146,18 +149,21 @@ class OuraClient:
         """Get the configured data source."""
         return self._data_source
     
-    def _get_token_or_raise(self) -> str:
+    def _get_token_or_raise(self, client_key: str) -> str:
         """Get the access token or raise NotAuthenticatedError.
         
         For sandbox modes, returns a dummy token since the sandbox API
         requires an auth header but accepts any token value.
+        
+        Args:
+            client_key: The client key to retrieve the token for.
         """
         if self._data_source != DataSource.USER:
             return "sandbox"
         
         if self._token_getter is None:
             raise NotAuthenticatedError("No token getter configured.")
-        token = self._token_getter()
+        token = self._token_getter(client_key)
         if not token:
             raise NotAuthenticatedError(
                 "Not authenticated. Please visit /auth/login first."
@@ -174,6 +180,7 @@ class OuraClient:
         self,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        client_key: str = "default",
     ) -> tuple[HeartRateData, date, date]:
         """
         Fetch heart rate data from Oura API.
@@ -183,6 +190,7 @@ class OuraClient:
         Args:
             start_date: Start date for data range
             end_date: End date for data range
+            client_key: The client key to retrieve the token for (USER mode only)
         
         Returns:
             Tuple of (heartrate_data, start_date, end_date)
@@ -212,7 +220,7 @@ class OuraClient:
                 return HeartRateData(data=samples), start_date, end_date
         
         url = f"{self._get_base_url()}/usercollection/heartrate"
-        headers = {"Authorization": f"Bearer {self._get_token_or_raise()}"}
+        headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}
         
         params = {
             "start_datetime": f"{start_date}T00:00:00",
@@ -242,6 +250,7 @@ class OuraClient:
         self,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        client_key: str = "default",
     ) -> tuple[list[SleepData], date, date]:
         """
         Fetch sleep data from Oura API.
@@ -251,6 +260,7 @@ class OuraClient:
         Args:
             start_date: Start date for data range
             end_date: End date for data range
+            client_key: The client key to retrieve the token for (USER mode only)
         
         Returns:
             Tuple of (sleep_data_list, start_date, end_date)
@@ -272,8 +282,7 @@ class OuraClient:
                 return [_parse_sleep_data(item) for item in cached.get("data", [])], start_date, end_date
         
         url = f"{self._get_base_url()}/usercollection/sleep"
-        headers = {"Authorization": f"Bearer {self._get_token_or_raise()}"}
-        
+        headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}        
         params = {
             "start_date": str(start_date),
             "end_date": str(end_date),
