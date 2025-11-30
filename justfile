@@ -23,7 +23,7 @@ test:
 clean:
     find tests/fixtures -name '*.json' -type f -delete
 
-playground-my-data:
+# Download last 5 years of user data in 30-day chunks (must run just run-user first & auth)
+get-playground-user-data:
     echo "Must run just run-user first & auth."
-    curl http://localhost:8000/raw/oura/heartrate | jq >  ./playground/user_data/heartrate.json
-    curl http://localhost:8000/raw/oura/sleep | jq > ./playground/user_data/sleep.json
+    uv run python playground/get_playground_user_data.py
