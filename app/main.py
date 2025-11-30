@@ -241,14 +241,14 @@ async def raw_heartrate(
         raise HTTPException(status_code=500, detail="Client not initialized")
     
     try:
-        data, actual_start, actual_end = await oura_client.get_heartrate_data(
+        raw_response, actual_start, actual_end = await oura_client.get_heartrate_data_raw(
             start_date, end_date
         )
         return {
             "data_source": oura_client.data_source.value,
             "start_date": str(actual_start),
             "end_date": str(actual_end),
-            "data": [{"bpm": s.bpm, "source": s.source, "timestamp": s.timestamp} for s in data.data],
+            "data": raw_response.get("data", []),
         }
     except NotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -273,33 +273,14 @@ async def raw_sleep(
         raise HTTPException(status_code=500, detail="Client not initialized")
     
     try:
-        sleep_data, actual_start, actual_end = await oura_client.get_sleep_data(
+        raw_response, actual_start, actual_end = await oura_client.get_sleep_data_raw(
             start_date, end_date
         )
         return {
             "data_source": oura_client.data_source.value,
             "start_date": str(actual_start),
             "end_date": str(actual_end),
-            "data": [
-                {
-                    "id": s.id,
-                    "day": s.day,
-                    "total_sleep_duration": s.total_sleep_duration,
-                    "average_heart_rate": s.average_heart_rate,
-                    "average_hrv": s.average_hrv,
-                    "heart_rate": {
-                        "interval": s.heart_rate.interval,
-                        "items": s.heart_rate.items,
-                        "timestamp": s.heart_rate.timestamp,
-                    } if s.heart_rate else None,
-                    "hrv": {
-                        "interval": s.hrv.interval,
-                        "items": s.hrv.items,
-                        "timestamp": s.hrv.timestamp,
-                    } if s.hrv else None,
-                }
-                for s in sleep_data
-            ],
+            "data": raw_response.get("data", []),
         }
     except NotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))

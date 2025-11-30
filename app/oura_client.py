@@ -196,14 +196,14 @@ class OuraClient:
             return OURA_API_BASE
         return OURA_SANDBOX_BASE
     
-    async def get_heartrate_data(
+    async def get_heartrate_data_raw(
         self,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         client_key: str = "default",
-    ) -> tuple[HeartRateData, date, date]:
+    ) -> tuple[dict, date, date]:
         """
-        Fetch heart rate data from Oura API.
+        Fetch raw heart rate data from Oura API without parsing.
         
         By default, fetches last 30 days of data.
         
@@ -213,7 +213,7 @@ class OuraClient:
             client_key: The client key to retrieve the token for (USER mode only)
         
         Returns:
-            Tuple of (heartrate_data, start_date, end_date)
+            Tuple of (raw_json_data, start_date, end_date)
         
         Raises:
             NotAuthenticatedError: If USER data source is used without authentication
@@ -230,15 +230,7 @@ class OuraClient:
             cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
             if cached is not None:
                 logger.info(f"Sandbox cache hit for {cache_endpoint} ({start_date} to {end_date})")
-                samples = [
-                    HeartRateSample(
-                        bpm=item.get("bpm", 0),
-                        source=item.get("source", ""),
-                        timestamp=item.get("timestamp", ""),
-                    )
-                    for item in cached.get("data", [])
-                ]
-                return HeartRateData(data=samples), start_date, end_date
+                return cached, start_date, end_date
             else:
                 logger.info(f"Sandbox cache miss for {cache_endpoint} ({start_date} to {end_date}), fetching from API")
         
@@ -261,15 +253,102 @@ class OuraClient:
             if self._data_source == DataSource.SANDBOX:
                 _save_to_sandbox_cache(cache_endpoint, json_data, start_date, end_date)
             
-            samples = [
-                HeartRateSample(
-                    bpm=item.get("bpm", 0),
-                    source=item.get("source", ""),
-                    timestamp=item.get("timestamp", ""),
-                )
-                for item in json_data.get("data", [])
-            ]
-            return HeartRateData(data=samples), start_date, end_date
+            return json_data, start_date, end_date
+
+    async def get_heartrate_data(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_key: str = "default",
+    ) -> tuple[HeartRateData, date, date]:
+        """
+        Fetch heart rate data from Oura API.
+        
+        By default, fetches last 30 days of data.
+        
+        Args:
+            start_date: Start date for data range
+            end_date: End date for data range
+            client_key: The client key to retrieve the token for (USER mode only)
+        
+        Returns:
+            Tuple of (heartrate_data, start_date, end_date)
+        
+        Raises:
+            NotAuthenticatedError: If USER data source is used without authentication
+        """
+        json_data, start_date, end_date = await self.get_heartrate_data_raw(
+            start_date, end_date, client_key
+        )
+        
+        samples = [
+            HeartRateSample(
+                bpm=item.get("bpm", 0),
+                source=item.get("source", ""),
+                timestamp=item.get("timestamp", ""),
+            )
+            for item in json_data.get("data", [])
+        ]
+        return HeartRateData(data=samples), start_date, end_date
+
+    async def get_sleep_data_raw(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_key: str = "default",
+    ) -> tuple[dict, date, date]:
+        """
+        Fetch raw sleep data from Oura API without parsing.
+        
+        By default, fetches last 30 days from user's data.
+        
+        Args:
+            start_date: Start date for data range
+            end_date: End date for data range
+            client_key: The client key to retrieve the token for (USER mode only)
+        
+        Returns:
+            Tuple of (raw_json_data, start_date, end_date)
+        
+        Raises:
+            NotAuthenticatedError: If USER data source is used without authentication
+        """
+        if end_date is None:
+            end_date = date.today()
+        if start_date is None:
+            start_date = end_date - timedelta(days=30)
+        
+        cache_endpoint = "usercollection_sleep"
+        
+        # For sandbox mode, try cache first
+        if self._data_source == DataSource.SANDBOX:
+            cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
+            if cached is not None:
+                logger.info(f"Sandbox cache hit for {cache_endpoint} ({start_date} to {end_date})")
+                return cached, start_date, end_date
+            else:
+                logger.info(f"Sandbox cache miss for {cache_endpoint} ({start_date} to {end_date}), fetching from API")
+        
+        url = f"{self._get_base_url()}/usercollection/sleep"
+        headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}
+        
+        params = {
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            if not response.is_success:
+                logger.error(f"Oura API error for sleep: {response.status_code} - {response.text}")
+            response.raise_for_status()
+            json_data = response.json()
+            
+            # Cache sandbox data
+            if self._data_source == DataSource.SANDBOX:
+                _save_to_sandbox_cache(cache_endpoint, json_data, start_date, end_date)
+            
+            return json_data, start_date, end_date
 
     async def get_sleep_data(
         self,
@@ -293,38 +372,8 @@ class OuraClient:
         Raises:
             NotAuthenticatedError: If USER data source is used without authentication
         """
-        if end_date is None:
-            end_date = date.today()
-        if start_date is None:
-            start_date = end_date - timedelta(days=30)
+        json_data, start_date, end_date = await self.get_sleep_data_raw(
+            start_date, end_date, client_key
+        )
         
-        cache_endpoint = "usercollection_sleep"
-        
-        # For sandbox mode, try cache first
-        if self._data_source == DataSource.SANDBOX:
-            cached = _load_from_sandbox_cache(cache_endpoint, start_date, end_date)
-            if cached is not None:
-                logger.info(f"Sandbox cache hit for {cache_endpoint} ({start_date} to {end_date})")
-                return [_parse_sleep_data(item) for item in cached.get("data", [])], start_date, end_date
-            else:
-                logger.info(f"Sandbox cache miss for {cache_endpoint} ({start_date} to {end_date}), fetching from API")
-        
-        url = f"{self._get_base_url()}/usercollection/sleep"
-        headers = {"Authorization": f"Bearer {self._get_token_or_raise(client_key)}"}        
-        params = {
-            "start_date": str(start_date),
-            "end_date": str(end_date),
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, headers=headers)
-            if not response.is_success:
-                logger.error(f"Oura API error for sleep: {response.status_code} - {response.text}")
-            response.raise_for_status()
-            json_data = response.json()
-            
-            # Cache sandbox data
-            if self._data_source == DataSource.SANDBOX:
-                _save_to_sandbox_cache(cache_endpoint, json_data, start_date, end_date)
-            
-            return [_parse_sleep_data(item) for item in json_data.get("data", [])], start_date, end_date
+        return [_parse_sleep_data(item) for item in json_data.get("data", [])], start_date, end_date
