@@ -9,7 +9,7 @@ import numpy as np
 from app.oura_client import SleepData, HeartRateData
 
 # Sources considered "active" heart rate (not resting/sleep)
-ACTIVE_HR_SOURCES = {"awake", "live", "workout"}
+NON_SLEEP_HR_SOURCES = {"awake", "live", "workout"}
 
 
 @dataclass
@@ -51,6 +51,17 @@ class DailyHeartRateAnalytics:
     hr_99th_percentile: float
 
 
+# Only include "long_sleep" type for nightly sleep analytics.
+# Sleep type statistics from historical data:
+# | Type       | Count | Avg Duration | Avg Start Time |
+# |------------|-------|--------------|----------------|
+# | late_nap   | 11    | 0h 30m       | 19:16          |
+# | long_sleep | 722   | 9h 52m       | 21:40          |
+# | rest       | 45    | 0h 34m       | 16:47          |
+# | sleep      | 843   | 0h 15m       | 15:58          |
+# Only "long_sleep" represents actual overnight sleep periods.
+NIGH_SLEEP_SLEEP_TYPE = "long_sleep"
+
 def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
     """Convert Oura sleep API response to DataFrame."""
     records = []
@@ -58,6 +69,7 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
         record = {
             "id": sleep.id,
             "day": sleep.day,
+            "type": sleep.type,
             "total_sleep_duration": sleep.total_sleep_duration,
             "average_heart_rate": sleep.average_heart_rate,
             "average_hrv": sleep.average_hrv,
@@ -69,7 +81,15 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
 
 
 def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
-    """Compute sleep analytics from DataFrame."""
+    """Compute sleep analytics from DataFrame.
+    
+    Filters to only include 'long_sleep' type entries for analysis.
+    See LONG_SLEEP_TYPE comment for sleep type statistics.
+    """
+    # Filter to only long_sleep type for meaningful nightly statistics
+    if not df.empty and "type" in df.columns:
+        df = df.loc[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+    
     # Get actual date range from the data
     if not df.empty:
         dates = pd.to_datetime(df["day"]).dt.date
@@ -137,7 +157,7 @@ def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
     """
     # Filter to active sources only
     if not df.empty:
-        active_df = df[df["source"].isin(ACTIVE_HR_SOURCES)]
+        active_df = df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES)]
     else:
         active_df = df
     
@@ -176,7 +196,7 @@ def analyze_heart_rate_daily(df: pd.DataFrame) -> list[DailyHeartRateAnalytics]:
         return []
     
     # Filter to active sources only
-    active_df = df[df["source"].isin(ACTIVE_HR_SOURCES)]
+    active_df = df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES)]
     
     if active_df.empty:
         return []

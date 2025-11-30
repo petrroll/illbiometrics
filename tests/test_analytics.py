@@ -14,6 +14,7 @@ from app.analytics import (
     analyze_heart_rate_daily,
     HeartRateAnalytics,
     DailyHeartRateAnalytics,
+    NIGH_SLEEP_SLEEP_TYPE,
 )
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data, HeartRateData, HeartRateSample
 
@@ -83,7 +84,9 @@ class TestAnalyzeSleep:
         
         result = analyze_sleep(df)
         
-        expected_median = df["total_sleep_duration"].median()
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_median = filtered_df["total_sleep_duration"].median()
         assert result.median_sleep_duration == round(expected_median, 2)
 
     def test_computes_median_avg_hr(self, sleep_data_list: list[dict]):
@@ -93,7 +96,9 @@ class TestAnalyzeSleep:
         
         result = analyze_sleep(df)
         
-        expected_median = df["average_heart_rate"].median()
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_median = filtered_df["average_heart_rate"].median()
         assert result.median_avg_hr == round(expected_median, 1)
 
     def test_computes_median_avg_hrv(self, sleep_data_list: list[dict]):
@@ -103,7 +108,9 @@ class TestAnalyzeSleep:
         
         result = analyze_sleep(df)
         
-        expected_median = df["average_hrv"].median()
+        # Filter to long_sleep only (same as analyze_sleep does)
+        filtered_df = df[df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        expected_median = filtered_df["average_hrv"].median()
         assert result.median_avg_hrv == round(expected_median, 1)
 
     def test_computes_hr_percentiles(self, sleep_data_list: list[dict]):
@@ -131,6 +138,7 @@ class TestAnalyzeSleep:
         sleep_data = SleepData(
             id="test-1",
             day="2025-01-01",
+            type="long_sleep",
             total_sleep_duration=28800,
             average_heart_rate=60.0,
             average_hrv=50,
@@ -153,6 +161,7 @@ class TestAnalyzeSleep:
         sleep_data = SleepData(
             id="test-1",
             day="2025-01-01",
+            type="long_sleep",
             total_sleep_duration=28800,
             average_heart_rate=60.0,
             average_hrv=50,
