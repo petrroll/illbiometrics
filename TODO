@@ -4,3 +4,32 @@
 Not-TODO but be aware, not prod ready
 - No validation on API params ?injection
 - the multitenancy support is essentially non-existent, no management of API keys
+
+---
+
+- Adjust dashboard to let you select a month, title should be sometihng like "Month representative of your baseline".
+
+Selecting configured 28 days from the start of that month. 
+
+If the last month is selected, the last 28 days are selected.
+
+Change all defaults to be last 28 days. 
+
+Add comment somewhere that it's 28 days so that it's unbiased to week-cycles. 
+
+Add info to analysis result:
+- Sleep - % of days with valid long sleep data / possible days (filtered in sleep data number / range number of days)
+- HR - % of samples vs all possible samples (1 a minute after resampling)
+- HR - ^^ per day
+
+---
+
+Fix: 
+The 5‑minute gaps come from the overall stream (all sources, all times). Rest/sleep hours dominate the raw dataset, so the percentile stats are mostly describing those nightly “every 5 min” intervals.
+When we build hourly averages we take only days above the 10th percentile and then average per hour per source. That denominator is 782 days, even if a given hour has data on just a handful of those days. So an hour with 150 actual samples spread across 20 days becomes 150 / 782 ≈ 0.19 samples per day.
+resample_heartrate runs per source (awake/live/rest/workout) rather than on the merged stream. If an hour is mostly “rest” but you look at “awake”, you’re seeing only the awake subset. Each source’s resampling also clips segments whenever gaps exceed 5 minutes (see HR_MAX_GAP_SECONDS = 300 in analytics.py), so you never fill an entire hour unless there was continuous data for that hour.
+The averages you saw (≈14 samples/hr for awake) mean that, even on the kept days, there are only ~14 minutes per day—in that hour—for which “awake” data actually exists. The rest of the hour simply had no “awake” readings, so there’s nothing to resample.
+If you merge sources before resampling (treat resting + active as a single stream) or change the denominator to “number of days with any data in that hour”, you’d see numbers closer to 30–60. Let me know if you want either of those alternative views.
+
+---
+
