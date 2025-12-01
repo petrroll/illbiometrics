@@ -16,7 +16,7 @@ from app.analytics import (
     HeartRateAnalytics,
     DailyHeartRateAnalytics,
     NIGH_SLEEP_SLEEP_TYPE,
-    HR_MAX_GAP_SECONDS,
+    DEFAULT_HR_MAX_GAP_SECONDS,
 )
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data, HeartRateData, HeartRateSample
 
@@ -576,7 +576,7 @@ class TestResampleHeartrate:
         assert result.iloc[0]["bpm"] == 85  # Max of 70, 85, 75
 
     def test_forward_fills_gaps_within_threshold(self):
-        """Test that gaps within HR_MAX_GAP_SECONDS are forward-filled."""
+        """Test that gaps within DEFAULT_HR_MAX_GAP_SECONDS are forward-filled."""
         # Two readings 3 minutes apart (within 300s threshold)
         samples = [
             HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
@@ -596,7 +596,7 @@ class TestResampleHeartrate:
         assert result.iloc[3]["bpm"] == 80
 
     def test_does_not_fill_gaps_exceeding_threshold(self):
-        """Test that gaps exceeding HR_MAX_GAP_SECONDS create separate segments."""
+        """Test that gaps exceeding DEFAULT_HR_MAX_GAP_SECONDS create separate segments."""
         # Two readings 6 minutes apart (exceeds 300s threshold)
         samples = [
             HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
@@ -623,7 +623,7 @@ class TestResampleHeartrate:
         
         result = resample_heartrate(df)
         
-        # 300s gap is NOT greater than HR_MAX_GAP_SECONDS, so should be connected
+        # 300s gap is NOT greater than DEFAULT_HR_MAX_GAP_SECONDS, so should be connected
         # Should have 6 entries: 10:00, 10:01, 10:02, 10:03, 10:04, 10:05
         assert len(result) == 6
 
@@ -638,7 +638,7 @@ class TestResampleHeartrate:
         
         result = resample_heartrate(df)
         
-        # 301s gap IS greater than HR_MAX_GAP_SECONDS, so separate segments
+        # 301s gap IS greater than DEFAULT_HR_MAX_GAP_SECONDS, so separate segments
         assert len(result) == 2
 
     def test_handles_empty_dataframe(self):

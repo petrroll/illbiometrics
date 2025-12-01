@@ -18,10 +18,6 @@ DEFAULT_HR_MAX_GAP_SECONDS = 300
 # Default resampling interval for heart rate data
 DEFAULT_HR_RESAMPLE_INTERVAL = "1min"
 
-# Legacy aliases for backwards compatibility (deprecated, use DEFAULT_* constants instead)
-HR_MAX_GAP_SECONDS = DEFAULT_HR_MAX_GAP_SECONDS
-HR_RESAMPLE_INTERVAL = DEFAULT_HR_RESAMPLE_INTERVAL
-
 
 @dataclass
 class SleepAnalytics:
