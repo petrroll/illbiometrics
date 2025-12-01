@@ -265,7 +265,7 @@
 
                 // Update Sleep Analytics
                 document.getElementById('sleepDateRange').textContent = 
-                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source})`;
+                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source}) • ${sleepData.nights_count} nights`;
                 document.getElementById('sleepDuration').textContent = formatDuration(sleepData.median_sleep_duration);
                 document.getElementById('sleepDurationStd').textContent = '±' + formatDuration(sleepData.sleep_duration_std);
                 document.getElementById('sleepHr').textContent = formatNumber(sleepData.median_avg_hr) + ' bpm';
@@ -279,7 +279,7 @@
                 
                 // Update HR Analytics
                 document.getElementById('hrDateRange').textContent = 
-                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source})`;
+                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source}) • ${hrData.hours_with_good_data} hours with good data`;
                 document.getElementById('hrAvg').textContent = formatNumber(hrData.average_hr) + ' bpm';
                 document.getElementById('hrAvgStd').textContent = '±' + formatNumber(hrData.average_hr_std) + ' bpm';
                 document.getElementById('hrP20').textContent = formatNumber(hrData.hr_20th_percentile);

@@ -24,6 +24,7 @@ class SleepAnalytics:
     """Sleep analytics results."""
     start_date: Optional[date]
     end_date: Optional[date]
+    nights_count: int
     median_sleep_duration: float
     sleep_duration_std: float
     median_avg_hr: float
@@ -35,12 +36,32 @@ class SleepAnalytics:
     hrv_20th_percentile: float
     hrv_80th_percentile: float
 
+    @classmethod
+    def empty(cls) -> "SleepAnalytics":
+        """Create an empty SleepAnalytics instance with default values."""
+        return cls(
+            start_date=None,
+            end_date=None,
+            nights_count=0,
+            median_sleep_duration=0.0,
+            sleep_duration_std=0.0,
+            median_avg_hr=0.0,
+            avg_hr_std=0.0,
+            median_avg_hrv=0.0,
+            avg_hrv_std=0.0,
+            hr_20th_percentile=0.0,
+            hr_80th_percentile=0.0,
+            hrv_20th_percentile=0.0,
+            hrv_80th_percentile=0.0,
+        )
+
 
 @dataclass
 class HeartRateAnalytics:
     """Heart rate analytics results (aggregated across all days)."""
     start_date: Optional[date]
     end_date: Optional[date]
+    hours_with_good_data: int
     average_hr: float
     average_hr_std: float
     hr_20th_percentile: float
@@ -48,6 +69,22 @@ class HeartRateAnalytics:
     hr_80th_percentile: float
     hr_95th_percentile: float
     hr_99th_percentile: float
+
+    @classmethod
+    def empty(cls) -> "HeartRateAnalytics":
+        """Create an empty HeartRateAnalytics instance with default values."""
+        return cls(
+            start_date=None,
+            end_date=None,
+            hours_with_good_data=0,
+            average_hr=0.0,
+            average_hr_std=0.0,
+            hr_20th_percentile=0.0,
+            hr_50th_percentile=0.0,
+            hr_80th_percentile=0.0,
+            hr_95th_percentile=0.0,
+            hr_99th_percentile=0.0,
+        )
 
 
 @dataclass
@@ -134,10 +171,14 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
 
     hr_arr = np.array(all_hr) if all_hr else np.array([0])
     hrv_arr = np.array(all_hrv) if all_hrv else np.array([0])
+    
+    # Count the number of nights (rows in filtered dataframe)
+    nights_count = len(df)
 
     return SleepAnalytics(
         start_date=actual_start,
         end_date=actual_end,
+        nights_count=nights_count,
         median_sleep_duration=float(round(median_duration, 2)) if not np.isnan(median_duration) else 0.0,
         sleep_duration_std=float(round(sleep_duration_std, 2)) if not np.isnan(sleep_duration_std) else 0.0,
         median_avg_hr=float(round(median_avg_hr, 1)) if not np.isnan(median_avg_hr) else 0.0,
@@ -273,17 +314,7 @@ def analyze_heart_rate(
         HeartRateAnalytics with aggregate statistics from active HR data.
     """
     if df.empty:
-        return HeartRateAnalytics(
-            start_date=None,
-            end_date=None,
-            average_hr=0.0,
-            average_hr_std=0.0,
-            hr_20th_percentile=0.0,
-            hr_50th_percentile=0.0,
-            hr_80th_percentile=0.0,
-            hr_95th_percentile=0.0,
-            hr_99th_percentile=0.0,
-        )
+        return HeartRateAnalytics.empty()
     
     # Get timestamps that have active sources
     active_timestamps = set(
@@ -292,49 +323,19 @@ def analyze_heart_rate(
     )
     
     if not active_timestamps:
-        return HeartRateAnalytics(
-            start_date=None,
-            end_date=None,
-            average_hr=0.0,
-            average_hr_std=0.0,
-            hr_20th_percentile=0.0,
-            hr_50th_percentile=0.0,
-            hr_80th_percentile=0.0,
-            hr_95th_percentile=0.0,
-            hr_99th_percentile=0.0,
-        )
+        return HeartRateAnalytics.empty()
     
     # Resample ALL sources as a merged stream
     resampled_df = resample_heartrate(df, max_gap_seconds, resample_interval)
     
     if resampled_df.empty:
-        return HeartRateAnalytics(
-            start_date=None,
-            end_date=None,
-            average_hr=0.0,
-            average_hr_std=0.0,
-            hr_20th_percentile=0.0,
-            hr_50th_percentile=0.0,
-            hr_80th_percentile=0.0,
-            hr_95th_percentile=0.0,
-            hr_99th_percentile=0.0,
-        )
+        return HeartRateAnalytics.empty()
     
     # Filter resampled data to only timestamps that had active sources
     resampled_df = resampled_df[resampled_df["timestamp"].isin(active_timestamps)]
     
     if resampled_df.empty:
-        return HeartRateAnalytics(
-            start_date=None,
-            end_date=None,
-            average_hr=0.0,
-            average_hr_std=0.0,
-            hr_20th_percentile=0.0,
-            hr_50th_percentile=0.0,
-            hr_80th_percentile=0.0,
-            hr_95th_percentile=0.0,
-            hr_99th_percentile=0.0,
-        )
+        return HeartRateAnalytics.empty()
     
     # Get actual date range from the data
     min_day = resampled_df["day"].min()
@@ -345,10 +346,16 @@ def analyze_heart_rate(
 
     average_hr = float(np.mean(hr_values)) if len(hr_values) > 0 else 0.0
     average_hr_std = float(np.std(hr_values)) if len(hr_values) > 0 else 0.0
+    
+    # Count hours with more than 10 samples (based on resampled data)
+    resampled_df["hour"] = resampled_df["timestamp"].dt.floor("h")
+    hourly_counts = resampled_df.groupby("hour").size()
+    hours_with_good_data = int((hourly_counts > 10).sum())
 
     return HeartRateAnalytics(
         start_date=actual_start,
         end_date=actual_end,
+        hours_with_good_data=hours_with_good_data,
         average_hr=float(round(average_hr, 1)),
         average_hr_std=float(round(average_hr_std, 1)),
         hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
