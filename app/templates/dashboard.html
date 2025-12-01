@@ -30,13 +30,11 @@
         <!-- Month Selector for Baseline -->
         <div class="bg-white rounded-lg shadow p-6 mb-6">
             <h2 class="text-lg font-semibold text-gray-700 mb-2">Month representative of your baseline</h2>
-            <p class="text-sm text-gray-500 mb-4">Queries 28 days of data (4 full weeks to avoid day-of-week bias). Oura API supports max 30 days per query.</p>
+            <p class="text-sm text-gray-500 mb-4">Pick a calendar month to anchor your baseline. Prior months use only their first 28 days; the current month automatically switches to the most recent 28-day window.</p>
             <div class="flex flex-wrap gap-4 items-end">
                 <div>
                     <label class="block text-sm text-gray-600 mb-1">Select Month</label>
-                    <select id="monthSelect" class="border rounded px-3 py-2 text-gray-700 min-w-48" onchange="onMonthChange()">
-                        <!-- Options populated by JavaScript -->
-                    </select>
+                    <input type="month" id="monthPicker" class="border rounded px-3 py-2 text-gray-700 min-w-48" onchange="onMonthChange()" />
                 </div>
                 <button onclick="loadData()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium">
                     Load Data
@@ -145,62 +143,47 @@
     </div>
 
     <script>
-        // Constants for date range calculation
-        // 28 days is used to:
-        // 1. Represent exactly 4 weeks, avoiding day-of-week bias in statistics
-        // 2. Stay within Oura API's max 30 days per query limit
-        // Note: This must match DEFAULT_QUERY_DAYS in app/oura_client.py
-        const BASELINE_DAYS = 28;
-
         let rawSleepData = null;
         let rawHrData = null;
 
         /**
-         * Populate the month selector dropdown with the last 12 months.
-         * Default selection is "Last 28 days" which uses rolling 28 days from today.
+         * Initialize the month picker with the current month (limits to current or earlier months).
          */
-        function populateMonthSelector() {
-            const select = document.getElementById('monthSelect');
+        function initMonthPicker() {
+            const picker = document.getElementById('monthPicker');
+            if (!picker) return;
             const today = new Date();
-            
-            // Add "Last 28 days" as the default option
-            const defaultOption = document.createElement('option');
-            defaultOption.value = 'last28';
-            defaultOption.textContent = 'Last 28 days';
-            defaultOption.selected = true;
-            select.appendChild(defaultOption);
-            
-            // Add the last 12 months as options
-            for (let i = 0; i < 12; i++) {
-                const monthDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
-                const option = document.createElement('option');
-                option.value = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
-                option.textContent = monthDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-                select.appendChild(option);
-            }
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const currentMonthValue = `${year}-${month}`;
+            picker.value = currentMonthValue;
+            picker.max = currentMonthValue;
         }
 
         /**
          * Calculate the date range based on the selected month.
-         * - "Last 28 days": Uses the last 28 days from today
-         * - Specific month: Uses 28 days from the start of that month
+         * - Latest month: Uses first of the month through today
+         * - Other months: Uses the full calendar month
          */
         function onMonthChange() {
-            const select = document.getElementById('monthSelect');
-            const value = select.value;
+            const picker = document.getElementById('monthPicker');
+            const value = picker?.value;
+            if (!value) {
+                return;
+            }
+            
+            const [year, month] = value.split('-').map(Number);
             const today = new Date();
-            
-            let startDate, endDate;
-            
-            if (value === 'last28') {
-                // Last 28 days from today (using milliseconds for accurate calculation)
-                endDate = today;
-                startDate = new Date(today.getTime() - (BASELINE_DAYS * 24 * 60 * 60 * 1000));
+            const isLatestMonth = year === today.getFullYear() && month === (today.getMonth() + 1);
+            let startDate = new Date(year, month - 1, 1);
+            let endDate;
+
+            if (isLatestMonth) {
+                endDate = new Date();
+                startDate = new Date(endDate);
+                startDate.setDate(endDate.getDate() - 27); // Rolling 28-day window
             } else {
-                // 28 days from the start of the selected month (using milliseconds)
-                const [year, month] = value.split('-').map(Number);
-                startDate = new Date(year, month - 1, 1);
-                endDate = new Date(startDate.getTime() + ((BASELINE_DAYS - 1) * 24 * 60 * 60 * 1000));
+                endDate = new Date(year, month - 1, 28); // First 28 days only
             }
             
             document.getElementById('startDate').value = startDate.toISOString().split('T')[0];
@@ -208,7 +191,7 @@
         }
 
         // Initialize month selector and set default dates
-        populateMonthSelector();
+        initMonthPicker();
         onMonthChange();
 
         // Check authentication status
@@ -282,7 +265,7 @@
 
                 // Update Sleep Analytics
                 document.getElementById('sleepDateRange').textContent = 
-                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source})`;
+                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source}) • ${sleepData.nights_count} nights`;
                 document.getElementById('sleepDuration').textContent = formatDuration(sleepData.median_sleep_duration);
                 document.getElementById('sleepDurationStd').textContent = '±' + formatDuration(sleepData.sleep_duration_std);
                 document.getElementById('sleepHr').textContent = formatNumber(sleepData.median_avg_hr) + ' bpm';
@@ -296,7 +279,7 @@
                 
                 // Update HR Analytics
                 document.getElementById('hrDateRange').textContent = 
-                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source})`;
+                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source}) • ${hrData.hours_with_good_data} hours with good data`;
                 document.getElementById('hrAvg').textContent = formatNumber(hrData.average_hr) + ' bpm';
                 document.getElementById('hrAvgStd').textContent = '±' + formatNumber(hrData.average_hr_std) + ' bpm';
                 document.getElementById('hrP20').textContent = formatNumber(hrData.hr_20th_percentile);

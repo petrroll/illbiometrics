@@ -11,12 +11,12 @@ from app.oura_client import SleepData, HeartRateData
 # Sources considered "active" heart rate (not resting/sleep)
 NON_SLEEP_HR_SOURCES = {"awake", "live", "workout"}
 
-# Maximum gap (in seconds) between consecutive HR points to consider them connected
+# Default maximum gap (in seconds) between consecutive HR points to consider them connected
 # Points further apart than this are not interpolated between
-HR_MAX_GAP_SECONDS = 300
+DEFAULT_HR_MAX_GAP_SECONDS = 300
 
-# Resampling interval for heart rate data
-HR_RESAMPLE_INTERVAL = "1min"
+# Default resampling interval for heart rate data
+DEFAULT_HR_RESAMPLE_INTERVAL = "1min"
 
 
 @dataclass
@@ -24,6 +24,7 @@ class SleepAnalytics:
     """Sleep analytics results."""
     start_date: Optional[date]
     end_date: Optional[date]
+    nights_count: int
     median_sleep_duration: float
     sleep_duration_std: float
     median_avg_hr: float
@@ -35,12 +36,32 @@ class SleepAnalytics:
     hrv_20th_percentile: float
     hrv_80th_percentile: float
 
+    @classmethod
+    def empty(cls) -> "SleepAnalytics":
+        """Create an empty SleepAnalytics instance with default values."""
+        return cls(
+            start_date=None,
+            end_date=None,
+            nights_count=0,
+            median_sleep_duration=0.0,
+            sleep_duration_std=0.0,
+            median_avg_hr=0.0,
+            avg_hr_std=0.0,
+            median_avg_hrv=0.0,
+            avg_hrv_std=0.0,
+            hr_20th_percentile=0.0,
+            hr_80th_percentile=0.0,
+            hrv_20th_percentile=0.0,
+            hrv_80th_percentile=0.0,
+        )
+
 
 @dataclass
 class HeartRateAnalytics:
     """Heart rate analytics results (aggregated across all days)."""
     start_date: Optional[date]
     end_date: Optional[date]
+    hours_with_good_data: int
     average_hr: float
     average_hr_std: float
     hr_20th_percentile: float
@@ -48,6 +69,22 @@ class HeartRateAnalytics:
     hr_80th_percentile: float
     hr_95th_percentile: float
     hr_99th_percentile: float
+
+    @classmethod
+    def empty(cls) -> "HeartRateAnalytics":
+        """Create an empty HeartRateAnalytics instance with default values."""
+        return cls(
+            start_date=None,
+            end_date=None,
+            hours_with_good_data=0,
+            average_hr=0.0,
+            average_hr_std=0.0,
+            hr_20th_percentile=0.0,
+            hr_50th_percentile=0.0,
+            hr_80th_percentile=0.0,
+            hr_95th_percentile=0.0,
+            hr_99th_percentile=0.0,
+        )
 
 
 @dataclass
@@ -134,10 +171,14 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
 
     hr_arr = np.array(all_hr) if all_hr else np.array([0])
     hrv_arr = np.array(all_hrv) if all_hrv else np.array([0])
+    
+    # Count the number of nights (rows in filtered dataframe)
+    nights_count = len(df)
 
     return SleepAnalytics(
         start_date=actual_start,
         end_date=actual_end,
+        nights_count=nights_count,
         median_sleep_duration=float(round(median_duration, 2)) if not np.isnan(median_duration) else 0.0,
         sleep_duration_std=float(round(sleep_duration_std, 2)) if not np.isnan(sleep_duration_std) else 0.0,
         median_avg_hr=float(round(median_avg_hr, 1)) if not np.isnan(median_avg_hr) else 0.0,
@@ -167,22 +208,36 @@ def oura_heartrate_to_dataframe(heartrate_data: HeartRateData) -> pd.DataFrame:
     return df
 
 
-def resample_heartrate(df: pd.DataFrame) -> pd.DataFrame:
-    """Resample heart rate data to 1-minute intervals.
+def resample_heartrate(
+    df: pd.DataFrame,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> pd.DataFrame:
+    """Resample heart rate data to regular intervals.
+    
+    This function resamples heart rate data across all sources as a single merged stream.
+    Consecutive points from different sources (e.g., rest->awake) are connected if within
+    the max gap threshold, allowing for continuous resampling across source transitions.
     
     Rules:
-    - If two consecutive points are more than HR_MAX_GAP_SECONDS apart,
+    - If two consecutive points are more than max_gap_seconds apart,
       they are not considered consecutive and we don't resample between them.
-    - If multiple points fall within the same minute, take their max.
-    - Resamples to 1-minute intervals, forward-filling values for gaps <= HR_MAX_GAP_SECONDS.
-      E.g., a reading at 10:00 with next reading at 10:03 produces values at 10:00, 10:01, 10:02.
+    - If multiple points fall within the same interval, take their max.
+    - Forward-fills values for gaps <= max_gap_seconds.
+      E.g., with 1min interval, a reading at 10:00 with next reading at 10:03 
+      produces values at 10:00, 10:01, 10:02.
     
     Args:
         df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
-            Should already be filtered to desired sources.
+        max_gap_seconds: Maximum gap in seconds between consecutive points to consider 
+            them connected. Points further apart create separate segments.
+            Default is 300 seconds (5 minutes).
+        resample_interval: Pandas frequency string for resampling interval.
+            Default is "1min".
     
     Returns:
-        Resampled DataFrame with 1-minute interval HR values.
+        Resampled DataFrame with interval HR values, containing columns:
+        'timestamp', 'bpm', 'day'.
     """
     if df.empty:
         return df
@@ -194,8 +249,8 @@ def resample_heartrate(df: pd.DataFrame) -> pd.DataFrame:
     # Calculate time gaps between consecutive points
     df["time_diff"] = df["timestamp"].diff().dt.total_seconds()
     
-    # Mark segment boundaries where gap > HR_MAX_GAP_SECONDS
-    df["segment"] = (df["time_diff"] > HR_MAX_GAP_SECONDS).cumsum()
+    # Mark segment boundaries where gap > max_gap_seconds
+    df["segment"] = (df["time_diff"] > max_gap_seconds).cumsum()
     
     resampled_segments = []
     
@@ -206,15 +261,15 @@ def resample_heartrate(df: pd.DataFrame) -> pd.DataFrame:
         # Set timestamp as index for resampling
         segment_df = segment_df.set_index("timestamp")
         
-        # Create a complete 1-minute range from first to last timestamp in segment
-        start_time = segment_df.index.min().floor(HR_RESAMPLE_INTERVAL)
-        end_time = segment_df.index.max().floor(HR_RESAMPLE_INTERVAL)
+        # Create a complete range from first to last timestamp in segment
+        start_time = segment_df.index.min().floor(resample_interval)
+        end_time = segment_df.index.max().floor(resample_interval)
         
-        # First, aggregate multiple readings within same minute by taking max
-        aggregated = segment_df["bpm"].resample(HR_RESAMPLE_INTERVAL, closed="left", label="left").max()
+        # First, aggregate multiple readings within same interval by taking max
+        aggregated = segment_df["bpm"].resample(resample_interval, closed="left", label="left").max()
         
-        # Create complete minute range and reindex with forward fill
-        full_range = pd.date_range(start=start_time, end=end_time, freq=HR_RESAMPLE_INTERVAL)
+        # Create complete range and reindex with forward fill
+        full_range = pd.date_range(start=start_time, end=end_time, freq=resample_interval)
         resampled = aggregated.reindex(full_range).ffill()
         
         # Drop any remaining NaN (shouldn't happen, but safety)
@@ -237,39 +292,70 @@ def resample_heartrate(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
+def analyze_heart_rate(
+    df: pd.DataFrame,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> HeartRateAnalytics:
     """Compute aggregate heart rate analytics from DataFrame (active heart rate only).
     
-    Filters to active sources: awake, live, workout (excludes rest/sleep data).
-    Resamples to 1-minute intervals before computing statistics.
-    """
-    # Filter to active sources only
-    if not df.empty:
-        active_df = df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES)]
-    else:
-        active_df = df
+    Resamples ALL sources as a merged stream to ensure continuous data across
+    source transitions, then filters to only include timestamps that had active
+    sources (awake, live, workout) in the original data.
     
-    # Resample to 1-minute intervals
-    resampled_df = resample_heartrate(active_df)
+    Args:
+        df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        max_gap_seconds: Maximum gap in seconds between consecutive points to consider 
+            them connected during resampling. Default is 300 seconds (5 minutes).
+        resample_interval: Pandas frequency string for resampling interval.
+            Default is "1min".
+    
+    Returns:
+        HeartRateAnalytics with aggregate statistics from active HR data.
+    """
+    if df.empty:
+        return HeartRateAnalytics.empty()
+    
+    # Get timestamps that have active sources
+    active_timestamps = set(
+        df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES), "timestamp"]
+        .dt.floor(resample_interval)
+    )
+    
+    if not active_timestamps:
+        return HeartRateAnalytics.empty()
+    
+    # Resample ALL sources as a merged stream
+    resampled_df = resample_heartrate(df, max_gap_seconds, resample_interval)
+    
+    if resampled_df.empty:
+        return HeartRateAnalytics.empty()
+    
+    # Filter resampled data to only timestamps that had active sources
+    resampled_df = resampled_df[resampled_df["timestamp"].isin(active_timestamps)]
+    
+    if resampled_df.empty:
+        return HeartRateAnalytics.empty()
     
     # Get actual date range from the data
-    if not resampled_df.empty:
-        min_day = resampled_df["day"].min()
-        max_day = resampled_df["day"].max()
-        actual_start: date | None = date(min_day.year, min_day.month, min_day.day)
-        actual_end: date | None = date(max_day.year, max_day.month, max_day.day)
-        hr_values = np.array(resampled_df["bpm"].tolist())
-    else:
-        actual_start = None
-        actual_end = None
-        hr_values = np.array([0])
+    min_day = resampled_df["day"].min()
+    max_day = resampled_df["day"].max()
+    actual_start: date | None = date(min_day.year, min_day.month, min_day.day)
+    actual_end: date | None = date(max_day.year, max_day.month, max_day.day)
+    hr_values = np.array(resampled_df["bpm"].tolist())
 
     average_hr = float(np.mean(hr_values)) if len(hr_values) > 0 else 0.0
     average_hr_std = float(np.std(hr_values)) if len(hr_values) > 0 else 0.0
+    
+    # Count hours with more than 10 samples (based on resampled data)
+    resampled_df["hour"] = resampled_df["timestamp"].dt.floor("h")
+    hourly_counts = resampled_df.groupby("hour").size()
+    hours_with_good_data = int((hourly_counts > 10).sum())
 
     return HeartRateAnalytics(
         start_date=actual_start,
         end_date=actual_end,
+        hours_with_good_data=hours_with_good_data,
         average_hr=float(round(average_hr, 1)),
         average_hr_std=float(round(average_hr_std, 1)),
         hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
@@ -280,23 +366,47 @@ def analyze_heart_rate(df: pd.DataFrame) -> HeartRateAnalytics:
     )
 
 
-def analyze_heart_rate_daily(df: pd.DataFrame) -> list[DailyHeartRateAnalytics]:
+def analyze_heart_rate_daily(
+    df: pd.DataFrame,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> list[DailyHeartRateAnalytics]:
     """Compute daily heart rate analytics from DataFrame (active heart rate only).
     
-    Filters to active sources: awake, live, workout (excludes rest/sleep data).
-    Resamples to 1-minute intervals before computing statistics.
+    Resamples ALL sources as a merged stream to ensure continuous data across
+    source transitions, then filters to only include timestamps that had active
+    sources (awake, live, workout) in the original data.
+    
+    Args:
+        df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        max_gap_seconds: Maximum gap in seconds between consecutive points to consider 
+            them connected during resampling. Default is 300 seconds (5 minutes).
+        resample_interval: Pandas frequency string for resampling interval.
+            Default is "1min".
+    
+    Returns:
+        List of DailyHeartRateAnalytics sorted by day.
     """
     if df.empty:
         return []
     
-    # Filter to active sources only
-    active_df = df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES)]
+    # Get timestamps that have active sources
+    active_timestamps = set(
+        df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES), "timestamp"]
+        .dt.floor(resample_interval)
+    )
     
-    if active_df.empty:
+    if not active_timestamps:
         return []
     
-    # Resample to 1-minute intervals
-    resampled_df = resample_heartrate(active_df)
+    # Resample ALL sources as a merged stream
+    resampled_df = resample_heartrate(df, max_gap_seconds, resample_interval)
+    
+    if resampled_df.empty:
+        return []
+    
+    # Filter resampled data to only timestamps that had active sources
+    resampled_df = resampled_df[resampled_df["timestamp"].isin(active_timestamps)]
     
     if resampled_df.empty:
         return []

@@ -16,7 +16,7 @@ from app.analytics import (
     HeartRateAnalytics,
     DailyHeartRateAnalytics,
     NIGH_SLEEP_SLEEP_TYPE,
-    HR_MAX_GAP_SECONDS,
+    DEFAULT_HR_MAX_GAP_SECONDS,
 )
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data, HeartRateData, HeartRateSample
 
@@ -576,7 +576,7 @@ class TestResampleHeartrate:
         assert result.iloc[0]["bpm"] == 85  # Max of 70, 85, 75
 
     def test_forward_fills_gaps_within_threshold(self):
-        """Test that gaps within HR_MAX_GAP_SECONDS are forward-filled."""
+        """Test that gaps within DEFAULT_HR_MAX_GAP_SECONDS are forward-filled."""
         # Two readings 3 minutes apart (within 300s threshold)
         samples = [
             HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
@@ -596,7 +596,7 @@ class TestResampleHeartrate:
         assert result.iloc[3]["bpm"] == 80
 
     def test_does_not_fill_gaps_exceeding_threshold(self):
-        """Test that gaps exceeding HR_MAX_GAP_SECONDS create separate segments."""
+        """Test that gaps exceeding DEFAULT_HR_MAX_GAP_SECONDS create separate segments."""
         # Two readings 6 minutes apart (exceeds 300s threshold)
         samples = [
             HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
@@ -623,7 +623,7 @@ class TestResampleHeartrate:
         
         result = resample_heartrate(df)
         
-        # 300s gap is NOT greater than HR_MAX_GAP_SECONDS, so should be connected
+        # 300s gap is NOT greater than DEFAULT_HR_MAX_GAP_SECONDS, so should be connected
         # Should have 6 entries: 10:00, 10:01, 10:02, 10:03, 10:04, 10:05
         assert len(result) == 6
 
@@ -638,7 +638,7 @@ class TestResampleHeartrate:
         
         result = resample_heartrate(df)
         
-        # 301s gap IS greater than HR_MAX_GAP_SECONDS, so separate segments
+        # 301s gap IS greater than DEFAULT_HR_MAX_GAP_SECONDS, so separate segments
         assert len(result) == 2
 
     def test_handles_empty_dataframe(self):
@@ -723,3 +723,183 @@ class TestResampleHeartrate:
         assert result.iloc[0]["bpm"] == 70
         assert result.iloc[1]["bpm"] == 75
         assert result.iloc[2]["bpm"] == 80
+
+    def test_custom_max_gap_seconds(self):
+        """Test that custom max_gap_seconds parameter is respected."""
+        # Two readings 3 minutes apart
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:03:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        # With default 300s threshold, should be connected (4 points)
+        result_default = resample_heartrate(df)
+        assert len(result_default) == 4
+        
+        # With 120s threshold (2 min), should be separate segments (2 points)
+        result_custom = resample_heartrate(df, max_gap_seconds=120)
+        assert len(result_custom) == 2
+
+    def test_custom_resample_interval(self):
+        """Test that custom resample_interval parameter is respected."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:04:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        # With 1-minute interval (default), should have 5 points
+        result_1min = resample_heartrate(df)
+        assert len(result_1min) == 5
+        
+        # With 2-minute interval, should have 3 points: 10:00, 10:02, 10:04
+        result_2min = resample_heartrate(df, resample_interval="2min")
+        assert len(result_2min) == 3
+
+    def test_mixed_sources_treated_as_single_stream(self):
+        """Test that different sources are resampled together as a single stream."""
+        # Mix of sources that would create gaps if resampled separately
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:04:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = resample_heartrate(df)
+        
+        # All 5 minutes should be covered since gaps are <= 5 min
+        assert len(result) == 5
+
+
+class TestMergedStreamResampling:
+    """Tests for merged stream resampling behavior across sources."""
+
+    def test_analyze_heart_rate_uses_merged_stream_for_segments(self):
+        """Test that analyze_heart_rate uses merged stream for segment detection."""
+        # Pattern: rest - awake - rest where awake would be isolated if filtered first
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:04:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate(df)
+        
+        # Should have non-None dates since there's active data
+        assert result.start_date is not None
+        assert result.end_date is not None
+        assert result.average_hr == 75.0  # Only the awake sample
+
+    def test_analyze_heart_rate_daily_uses_merged_stream_for_segments(self):
+        """Test that analyze_heart_rate_daily uses merged stream for segment detection."""
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:04:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate_daily(df)
+        
+        assert len(result) == 1
+        assert result[0].day == date(2025, 1, 1)
+        assert result[0].average_hr == 75.0  # Only the awake sample
+
+    def test_analyze_heart_rate_custom_parameters(self):
+        """Test that analyze_heart_rate accepts custom resampling parameters."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:03:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        # With default parameters, should work
+        result_default = analyze_heart_rate(df)
+        assert result_default.start_date is not None
+        
+        # With custom max_gap_seconds=120, 3-minute gap creates separate segments
+        result_custom = analyze_heart_rate(df, max_gap_seconds=120)
+        assert result_custom.start_date is not None
+
+    def test_analyze_heart_rate_daily_custom_parameters(self):
+        """Test that analyze_heart_rate_daily accepts custom resampling parameters."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:03:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        # With default parameters
+        result_default = analyze_heart_rate_daily(df)
+        assert len(result_default) == 1
+        
+        # With custom resample_interval
+        result_custom = analyze_heart_rate_daily(df, resample_interval="2min")
+        assert len(result_custom) == 1
+
+    def test_source_transitions_dont_break_resampling(self):
+        """Test that source type changes don't create artificial gaps in resampling."""
+        # Continuous data with source transitions every 2 minutes
+        # Without merged stream, this would create 3 segments
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=85, source="workout", timestamp="2025-01-01T10:04:00+00:00"),
+            HeartRateSample(bpm=78, source="live", timestamp="2025-01-01T10:06:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = resample_heartrate(df)
+        
+        # All should be in one continuous segment (7 points: 10:00 through 10:06)
+        assert len(result) == 7
+        
+        # Verify no gaps in timestamps
+        timestamps = result["timestamp"].tolist()
+        for i in range(1, len(timestamps)):
+            diff = (timestamps[i] - timestamps[i-1]).total_seconds()
+            assert diff == 60  # All consecutive
+
+    def test_analyze_filters_to_active_sources_after_merged_resample(self):
+        """Test that analysis only includes active source timestamps after resampling."""
+        # The merged resample allows continuous data, but final stats should only
+        # include timestamps where active sources were present
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:03:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate(df)
+        
+        # Average should be from awake timestamps only: (75 + 80) / 2 = 77.5
+        assert result.average_hr == 77.5
+
+    def test_only_rest_data_returns_empty_result(self):
+        """Test that data with only rest source returns empty result for active analysis."""
+        samples = [
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:02:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_heart_rate(df)
+        
+        assert result.start_date is None
+        assert result.end_date is None
+        assert result.average_hr == 0.0
