@@ -114,7 +114,7 @@ async def health():
 
 @analytics_router.get("/sleep")
 async def sleep_analytics(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
@@ -156,7 +156,7 @@ async def sleep_analytics(
 
 @analytics_router.get("/heartrate")
 async def heartrate_analytics(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
@@ -196,7 +196,7 @@ async def heartrate_analytics(
 
 @analytics_router.get("/heart-rate-daily")
 async def heartrate_daily_analytics(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
@@ -241,7 +241,7 @@ async def heartrate_daily_analytics(
 
 @raw_router.get("/oura/heartrate")
 async def raw_heartrate(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
@@ -273,7 +273,7 @@ async def raw_heartrate(
 
 @raw_router.get("/oura/sleep")
 async def raw_sleep(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 30 days ago"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
