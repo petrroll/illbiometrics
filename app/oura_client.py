@@ -11,6 +11,11 @@ from app.config import OURA_API_BASE, OURA_SANDBOX_BASE, SANDBOX_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
+# Default query timespan is 28 days. This is chosen because:
+# 1. It's exactly 4 weeks, making it unbiased to day-of-week cycles
+# 2. Oura API supports querying max 30 days at a time
+DEFAULT_QUERY_DAYS = 28
+
 
 class DataSource(str, Enum):
     """Data source options for Oura API."""
@@ -207,7 +212,7 @@ class OuraClient:
         """
         Fetch raw heart rate data from Oura API without parsing.
         
-        By default, fetches last 30 days of data.
+        By default, fetches last 28 days of data.
         
         Args:
             start_date: Start date for data range
@@ -223,7 +228,7 @@ class OuraClient:
         if end_date is None:
             end_date = date.today()
         if start_date is None:
-            start_date = end_date - timedelta(days=30)
+            start_date = end_date - timedelta(days=DEFAULT_QUERY_DAYS)
         
         cache_endpoint = "usercollection_heartrate"
         
@@ -266,7 +271,7 @@ class OuraClient:
         """
         Fetch heart rate data from Oura API.
         
-        By default, fetches last 30 days of data.
+        By default, fetches last 28 days of data.
         
         Args:
             start_date: Start date for data range
@@ -302,7 +307,7 @@ class OuraClient:
         """
         Fetch raw sleep data from Oura API without parsing.
         
-        By default, fetches last 30 days from user's data.
+        By default, fetches last 28 days from user's data.
         
         Args:
             start_date: Start date for data range
@@ -318,7 +323,7 @@ class OuraClient:
         if end_date is None:
             end_date = date.today()
         if start_date is None:
-            start_date = end_date - timedelta(days=30)
+            start_date = end_date - timedelta(days=DEFAULT_QUERY_DAYS)
         
         cache_endpoint = "usercollection_sleep"
         
@@ -361,7 +366,7 @@ class OuraClient:
         """
         Fetch sleep data from Oura API.
         
-        By default, fetches last 30 days from user's data.
+        By default, fetches last 28 days from user's data.
         
         Args:
             start_date: Start date for data range
