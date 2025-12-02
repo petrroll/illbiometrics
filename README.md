@@ -42,7 +42,7 @@ Future planned integrations:
 - `GET /auth/login` - Redirect to OAuth login
 - `GET /auth/callback` - OAuth callback handler
 - `GET /auth/status` - Check authentication status
-- `GET /analytics/sleep` - Get sleep analytics
-- `GET /analytics/heartrate` - Get heart rate analytics
+- `GET /analytics` - Get combined sleep and heart rate analytics
+- `GET /analytics/daily` - Get daily heart rate analytics
 - `GET /raw/oura/heartrate` - Get raw heart rate data from Oura
 - `GET /raw/oura/sleep` - Get raw sleep data from Oura

@@ -59,6 +59,8 @@ class SleepData:
     id: str
     day: str
     type: str
+    bedtime_start: Optional[str]
+    bedtime_end: Optional[str]
     total_sleep_duration: Optional[int]
     average_heart_rate: Optional[float]
     average_hrv: Optional[int]
@@ -91,6 +93,8 @@ def _parse_sleep_data(data: dict) -> SleepData:
         id=data.get("id", ""),
         day=data.get("day", ""),
         type=data.get("type", ""),
+        bedtime_start=data.get("bedtime_start"),
+        bedtime_end=data.get("bedtime_end"),
         total_sleep_duration=data.get("total_sleep_duration"),
         average_heart_rate=data.get("average_heart_rate"),
         average_hrv=data.get("average_hrv"),

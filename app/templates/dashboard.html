@@ -246,26 +246,26 @@
 
             try {
                 // Fetch all data in parallel
-                const [sleepRes, hrRes, rawSleepRes, rawHrRes] = await Promise.all([
-                    fetch('/analytics/sleep' + queryString),
-                    fetch('/analytics/heartrate' + queryString),
+                const [analyticsRes, rawSleepRes, rawHrRes] = await Promise.all([
+                    fetch('/analytics' + queryString),
                     fetch('/raw/oura/sleep' + queryString),
                     fetch('/raw/oura/heartrate' + queryString)
                 ]);
 
-                if (!sleepRes.ok || !hrRes.ok) {
-                    const errorData = await (sleepRes.ok ? hrRes : sleepRes).json();
+                if (!analyticsRes.ok) {
+                    const errorData = await analyticsRes.json();
                     throw new Error(errorData.detail || 'Failed to fetch data');
                 }
 
-                const sleepData = await sleepRes.json();
-                const hrData = await hrRes.json();
+                const analyticsData = await analyticsRes.json();
+                const sleepData = analyticsData.sleep;
+                const hrData = analyticsData.heart_rate;
                 rawSleepData = await rawSleepRes.json();
                 rawHrData = await rawHrRes.json();
 
                 // Update Sleep Analytics
                 document.getElementById('sleepDateRange').textContent = 
-                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${sleepData.data_source}) • ${sleepData.nights_count} nights`;
+                    `${sleepData.start_date || 'N/A'} to ${sleepData.end_date || 'N/A'} (${analyticsData.data_source}) • ${sleepData.nights_count} nights`;
                 document.getElementById('sleepDuration').textContent = formatDuration(sleepData.median_sleep_duration);
                 document.getElementById('sleepDurationStd').textContent = '±' + formatDuration(sleepData.sleep_duration_std);
                 document.getElementById('sleepHr').textContent = formatNumber(sleepData.median_avg_hr) + ' bpm';
@@ -279,7 +279,7 @@
                 
                 // Update HR Analytics
                 document.getElementById('hrDateRange').textContent = 
-                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${hrData.data_source}) • ${hrData.hours_with_good_data} hours with good data`;
+                    `${hrData.start_date || 'N/A'} to ${hrData.end_date || 'N/A'} (${analyticsData.data_source}) • ${hrData.hours_with_good_data} hours with good data • ${formatNumber(hrData.sleep_hours_filtered)} sleep hours filtered`;
                 document.getElementById('hrAvg').textContent = formatNumber(hrData.average_hr) + ' bpm';
                 document.getElementById('hrAvgStd').textContent = '±' + formatNumber(hrData.average_hr_std) + ' bpm';
                 document.getElementById('hrP20').textContent = formatNumber(hrData.hr_20th_percentile);

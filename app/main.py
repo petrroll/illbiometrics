@@ -19,10 +19,9 @@ from app.auth import router as auth_router, get_stored_token
 from app.oura_client import OuraClient, DataSource, NotAuthenticatedError
 from app.analytics import (
     oura_sleep_to_dataframe,
-    analyze_sleep,
     oura_heartrate_to_dataframe,
-    analyze_heart_rate,
-    analyze_heart_rate_daily,
+    analyze_combined,
+    analyze_combined_daily,
 )
 
 # Create routers for grouping endpoints
@@ -112,40 +111,61 @@ async def health():
     }
 
 
-@analytics_router.get("/sleep")
-async def sleep_analytics(
+@analytics_router.get("")
+async def combined_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
-    Get sleep analytics.
+    Get combined sleep and heart rate analytics.
     
-    Returns median sleep duration, HR, HRV, percentiles, and variability (standard deviation).
+    Returns sleep analytics (median duration, HR, HRV, percentiles) and
+    heart rate analytics (average, std, percentiles) for the date range.
+    Heart rate samples during sleep periods are excluded.
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
     
     try:
-        sleep_data, actual_start, actual_end = await oura_client.get_sleep_data(
-            start_date, end_date
-        )
-        df = oura_sleep_to_dataframe(sleep_data)
-        analytics = analyze_sleep(df)
+        # Fetch both sleep and heart rate data
+        sleep_data, _, _ = await oura_client.get_sleep_data(start_date, end_date)
+        heartrate_data, _, _ = await oura_client.get_heartrate_data(start_date, end_date)
+        
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        analytics = analyze_combined(sleep_df, hr_df)
+        
         return {
             "data_source": oura_client.data_source.value,
-            "start_date": str(analytics.start_date) if analytics.start_date else None,
-            "end_date": str(analytics.end_date) if analytics.end_date else None,
-            "nights_count": analytics.nights_count,
-            "median_sleep_duration": analytics.median_sleep_duration,
-            "sleep_duration_std": analytics.sleep_duration_std,
-            "median_avg_hr": analytics.median_avg_hr,
-            "avg_hr_std": analytics.avg_hr_std,
-            "median_avg_hrv": analytics.median_avg_hrv,
-            "avg_hrv_std": analytics.avg_hrv_std,
-            "hr_20th_percentile": analytics.hr_20th_percentile,
-            "hr_80th_percentile": analytics.hr_80th_percentile,
-            "hrv_20th_percentile": analytics.hrv_20th_percentile,
-            "hrv_80th_percentile": analytics.hrv_80th_percentile,
+            "sleep": {
+                "start_date": str(analytics.sleep.start_date) if analytics.sleep.start_date else None,
+                "end_date": str(analytics.sleep.end_date) if analytics.sleep.end_date else None,
+                "nights_count": analytics.sleep.nights_count,
+                "median_sleep_duration": analytics.sleep.median_sleep_duration,
+                "sleep_duration_std": analytics.sleep.sleep_duration_std,
+                "median_avg_hr": analytics.sleep.median_avg_hr,
+                "avg_hr_std": analytics.sleep.avg_hr_std,
+                "median_avg_hrv": analytics.sleep.median_avg_hrv,
+                "avg_hrv_std": analytics.sleep.avg_hrv_std,
+                "hr_20th_percentile": analytics.sleep.hr_20th_percentile,
+                "hr_80th_percentile": analytics.sleep.hr_80th_percentile,
+                "hrv_20th_percentile": analytics.sleep.hrv_20th_percentile,
+                "hrv_80th_percentile": analytics.sleep.hrv_80th_percentile,
+            },
+            "heart_rate": {
+                "start_date": str(analytics.heart_rate.start_date) if analytics.heart_rate.start_date else None,
+                "end_date": str(analytics.heart_rate.end_date) if analytics.heart_rate.end_date else None,
+                "hours_with_good_data": analytics.heart_rate.hours_with_good_data,
+                "sleep_hours_filtered": analytics.heart_rate.sleep_hours_filtered,
+                "average_hr": analytics.heart_rate.average_hr,
+                "average_hr_std": analytics.heart_rate.average_hr_std,
+                "hr_20th_percentile": analytics.heart_rate.hr_20th_percentile,
+                "hr_50th_percentile": analytics.heart_rate.hr_50th_percentile,
+                "hr_80th_percentile": analytics.heart_rate.hr_80th_percentile,
+                "hr_95th_percentile": analytics.heart_rate.hr_95th_percentile,
+                "hr_99th_percentile": analytics.heart_rate.hr_99th_percentile,
+            },
         }
     except NotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -155,67 +175,30 @@ async def sleep_analytics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@analytics_router.get("/heartrate")
-async def heartrate_analytics(
+@analytics_router.get("/daily")
+async def combined_daily_analytics(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
     end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
 ):
     """
-    Get aggregate non-sleep heart rate analytics.
+    Get daily heart rate analytics.
     
-    Returns average heart rate, variability (standard deviation), and p20, p50, p80, p95, p99 percentiles
-    across all days in the date range.
+    Returns average heart rate and percentiles for each day.
+    Heart rate samples during sleep periods are excluded.
     """
     if oura_client is None:
         raise HTTPException(status_code=500, detail="Client not initialized")
     
     try:
-        heartrate_data, actual_start, actual_end = await oura_client.get_heartrate_data(
-            start_date, end_date
-        )
-        df = oura_heartrate_to_dataframe(heartrate_data)
-        analytics = analyze_heart_rate(df)
-        return {
-            "data_source": oura_client.data_source.value,
-            "start_date": str(analytics.start_date) if analytics.start_date else None,
-            "end_date": str(analytics.end_date) if analytics.end_date else None,
-            "hours_with_good_data": analytics.hours_with_good_data,
-            "average_hr": analytics.average_hr,
-            "average_hr_std": analytics.average_hr_std,
-            "hr_20th_percentile": analytics.hr_20th_percentile,
-            "hr_50th_percentile": analytics.hr_50th_percentile,
-            "hr_80th_percentile": analytics.hr_80th_percentile,
-            "hr_95th_percentile": analytics.hr_95th_percentile,
-            "hr_99th_percentile": analytics.hr_99th_percentile,
-        }
-    except NotAuthenticatedError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@analytics_router.get("/heart-rate-daily")
-async def heartrate_daily_analytics(
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
-    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
-):
-    """
-    Get daily non-sleep heart rate analytics.
-    
-    Returns average heart rate and p20, p50, p80, p95, p99 percentiles
-    for each day in the date range.
-    """
-    if oura_client is None:
-        raise HTTPException(status_code=500, detail="Client not initialized")
-    
-    try:
-        heartrate_data, actual_start, actual_end = await oura_client.get_heartrate_data(
-            start_date, end_date
-        )
-        df = oura_heartrate_to_dataframe(heartrate_data)
-        daily_analytics = analyze_heart_rate_daily(df)
+        # Fetch both sleep and heart rate data
+        sleep_data, actual_start, actual_end = await oura_client.get_sleep_data(start_date, end_date)
+        heartrate_data, _, _ = await oura_client.get_heartrate_data(start_date, end_date)
+        
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        analytics = analyze_combined_daily(sleep_df, hr_df)
+        
         return {
             "data_source": oura_client.data_source.value,
             "start_date": str(actual_start),
@@ -230,7 +213,7 @@ async def heartrate_daily_analytics(
                     "hr_95th_percentile": day.hr_95th_percentile,
                     "hr_99th_percentile": day.hr_99th_percentile,
                 }
-                for day in daily_analytics
+                for day in analytics.days
             ],
         }
     except NotAuthenticatedError as e:

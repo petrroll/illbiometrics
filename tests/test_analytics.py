@@ -3,7 +3,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, datetime
 
 from app.analytics import (
     oura_sleep_to_dataframe,
@@ -17,6 +17,12 @@ from app.analytics import (
     DailyHeartRateAnalytics,
     NIGH_SLEEP_SLEEP_TYPE,
     DEFAULT_HR_MAX_GAP_SECONDS,
+    get_sleep_intervals,
+    filter_hr_outside_sleep,
+    analyze_combined,
+    analyze_combined_daily,
+    CombinedAnalytics,
+    CombinedDailyAnalytics,
 )
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data, HeartRateData, HeartRateSample
 
@@ -141,6 +147,8 @@ class TestAnalyzeSleep:
             id="test-1",
             day="2025-01-01",
             type="long_sleep",
+            bedtime_start="2025-01-01T22:00:00+00:00",
+            bedtime_end="2025-01-02T06:00:00+00:00",
             total_sleep_duration=28800,
             average_heart_rate=60.0,
             average_hrv=50,
@@ -164,6 +172,8 @@ class TestAnalyzeSleep:
             id="test-1",
             day="2025-01-01",
             type="long_sleep",
+            bedtime_start="2025-01-01T22:00:00+00:00",
+            bedtime_end="2025-01-02T06:00:00+00:00",
             total_sleep_duration=28800,
             average_heart_rate=60.0,
             average_hrv=50,
@@ -234,6 +244,8 @@ class TestAnalyzeSleep:
             id="test-1",
             day="2025-01-01",
             type="long_sleep",
+            bedtime_start="2025-01-01T22:00:00+00:00",
+            bedtime_end="2025-01-02T06:00:00+00:00",
             total_sleep_duration=28800,
             average_heart_rate=60.0,
             average_hrv=50,
@@ -304,66 +316,192 @@ class TestOuraHeartrateToDataframe:
         assert df.iloc[0]["source"] == first_record["source"]
 
 
+class TestGetSleepIntervals:
+    """Tests for get_sleep_intervals function."""
+
+    def test_extracts_sleep_intervals_from_long_sleep(self):
+        """Test that sleep intervals are extracted from long_sleep entries."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        intervals = get_sleep_intervals(df)
+        
+        assert len(intervals) == 1
+        assert intervals[0][0] == pd.Timestamp("2025-01-01T22:00:00+00:00")
+        assert intervals[0][1] == pd.Timestamp("2025-01-02T06:00:00+00:00")
+
+    def test_ignores_non_long_sleep_types(self):
+        """Test that non-long_sleep types are ignored."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="rest",
+                bedtime_start="2025-01-01T14:00:00+00:00",
+                bedtime_end="2025-01-01T14:30:00+00:00",
+                total_sleep_duration=1800,
+                average_heart_rate=55.0,
+                average_hrv=60,
+                heart_rate=None,
+                hrv=None,
+            ),
+            SleepData(
+                id="test-2",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        intervals = get_sleep_intervals(df)
+        
+        # Only long_sleep should be included
+        assert len(intervals) == 1
+
+    def test_handles_empty_dataframe(self):
+        """Test that empty DataFrame returns empty list."""
+        df = pd.DataFrame()
+        
+        intervals = get_sleep_intervals(df)
+        
+        assert intervals == []
+
+
+class TestFilterHrOutsideSleep:
+    """Tests for filter_hr_outside_sleep function."""
+
+    def test_filters_out_samples_during_sleep(self):
+        """Test that HR samples during sleep are filtered out."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T20:00:00+00:00"),  # Before sleep
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),   # During sleep
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T08:00:00+00:00"),  # After sleep
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
+        
+        filtered_df, sleep_hours = filter_hr_outside_sleep(hr_df, sleep_intervals)
+        
+        # Only 2 samples should remain (before and after sleep)
+        assert len(filtered_df) == 2
+        assert list(filtered_df["bpm"]) == [70, 75]
+        # 8 hours of sleep
+        assert sleep_hours == 8.0
+
+    def test_handles_multiple_sleep_intervals(self):
+        """Test filtering with multiple sleep intervals."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),   # Night 1
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T12:00:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-02T23:00:00+00:00"),   # Night 2
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-03T10:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00")),
+            (pd.Timestamp("2025-01-02T22:00:00+00:00"), pd.Timestamp("2025-01-03T06:00:00+00:00")),
+        ]
+        
+        filtered_df, sleep_hours = filter_hr_outside_sleep(hr_df, sleep_intervals)
+        
+        # Only 3 samples should remain
+        assert len(filtered_df) == 3
+        # 16 hours of sleep total (2 nights * 8 hours)
+        assert sleep_hours == 16.0
+
+    def test_returns_all_samples_when_no_sleep_intervals(self):
+        """Test that all samples are returned when there are no sleep intervals."""
+        samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T12:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        filtered_df, sleep_hours = filter_hr_outside_sleep(hr_df, [])
+        
+        assert len(filtered_df) == 2
+        assert sleep_hours == 0.0
+
+
 class TestAnalyzeHeartRate:
     """Tests for analyze_heart_rate function."""
 
-    def test_returns_heart_rate_analytics_dataclass(self, heartrate_data_list: list[dict]):
+    def test_returns_heart_rate_analytics_dataclass(self):
         """Test that analyze_heart_rate returns HeartRateAnalytics dataclass."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals=[])
         
         assert isinstance(result, HeartRateAnalytics)
-        # Dates should be extracted from actual data
         assert result.start_date is not None
         assert result.end_date is not None
-        assert result.start_date <= result.end_date
 
-    def test_filters_to_active_sources_only(self, heartrate_data_list: list[dict]):
-        """Test that only active source data (awake, live, workout) is used for analytics."""
+    def test_filters_out_sleep_periods(self):
+        """Test that HR samples during sleep are excluded from analytics."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T20:00:00+00:00"),  # Before sleep
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),   # During sleep
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T08:00:00+00:00"),  # After sleep
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
         
-        # Manually compute expected average from active sources only
-        active_sources = {"awake", "live", "workout"}
-        active_samples = [item for item in heartrate_data_list if item["source"] in active_sources]
-        expected_avg = sum(s["bpm"] for s in active_samples) / len(active_samples)
+        result = analyze_heart_rate(df, sleep_intervals)
         
-        assert result.average_hr == round(expected_avg, 1)
+        # Average should be from non-sleep samples only: (70 + 75) / 2 = 72.5
+        assert result.average_hr == 72.5
 
-    def test_computes_hr_percentiles(self, heartrate_data_list: list[dict]):
+    def test_computes_hr_percentiles(self):
         """Test that HR percentiles are computed correctly."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=85, source="awake", timestamp="2025-01-01T10:03:00+00:00"),
+            HeartRateSample(bpm=90, source="awake", timestamp="2025-01-01T10:04:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals=[])
         
         # Percentiles should be in order
         assert result.hr_20th_percentile <= result.hr_50th_percentile
@@ -376,45 +514,46 @@ class TestAnalyzeHeartRate:
         heartrate_data = HeartRateData(data=[])
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals=[])
         
         assert result.start_date is None
         assert result.end_date is None
         assert result.average_hr == 0.0
 
-    def test_handles_only_rest_data(self):
-        """Test that data with only rest source returns empty-like result."""
+    def test_handles_all_data_during_sleep(self):
+        """Test that data entirely during sleep returns empty result."""
         samples = [
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T02:00:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T03:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-02T03:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
         
-        # No active data, should return None dates
+        result = analyze_heart_rate(df, sleep_intervals)
+        
         assert result.start_date is None
         assert result.end_date is None
+        assert result.average_hr == 0.0
 
-    def test_computes_average_hr_std(self, heartrate_data_list: list[dict]):
+    def test_computes_average_hr_std(self):
         """Test that standard deviation of heart rate is computed."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=90, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals=[])
         
         # Std should be non-negative
         assert result.average_hr_std >= 0
-        # For realistic data, std should be greater than 0 (there's variation)
+        # For this data, std should be greater than 0 (there's variation)
         assert result.average_hr_std > 0
 
     def test_handles_empty_data_std(self):
@@ -422,7 +561,7 @@ class TestAnalyzeHeartRate:
         heartrate_data = HeartRateData(data=[])
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals=[])
         
         assert result.average_hr_std == 0.0
 
@@ -430,61 +569,50 @@ class TestAnalyzeHeartRate:
 class TestAnalyzeHeartRateDaily:
     """Tests for analyze_heart_rate_daily function."""
 
-    def test_returns_list_of_daily_analytics(self, heartrate_data_list: list[dict]):
+    def test_returns_list_of_daily_analytics(self):
         """Test that analyze_heart_rate_daily returns list of DailyHeartRateAnalytics."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        result = analyze_heart_rate_daily(df, sleep_intervals=[])
         
         assert isinstance(result, list)
-        assert len(result) > 0
+        assert len(result) == 2
         assert all(isinstance(day, DailyHeartRateAnalytics) for day in result)
 
-    def test_returns_one_entry_per_day(self, heartrate_data_list: list[dict]):
+    def test_returns_one_entry_per_day(self):
         """Test that each day has exactly one entry."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T14:00:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        result = analyze_heart_rate_daily(df, sleep_intervals=[])
         
-        # Get unique active days from fixture
-        active_sources = {"awake", "live", "workout"}
-        active_items = [item for item in heartrate_data_list if item["source"] in active_sources]
-        unique_days = set(pd.to_datetime(item["timestamp"]).date() for item in active_items)
-        
-        assert len(result) == len(unique_days)
+        # Two unique days
+        assert len(result) == 2
 
-    def test_computes_daily_percentiles(self, heartrate_data_list: list[dict]):
+    def test_computes_daily_percentiles(self):
         """Test that daily percentiles are computed correctly."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
+            HeartRateSample(bpm=85, source="awake", timestamp="2025-01-01T10:03:00+00:00"),
+            HeartRateSample(bpm=90, source="awake", timestamp="2025-01-01T10:04:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        result = analyze_heart_rate_daily(df, sleep_intervals=[])
         
         for day in result:
             # Percentiles should be in order
@@ -493,20 +621,17 @@ class TestAnalyzeHeartRateDaily:
             assert day.hr_80th_percentile <= day.hr_95th_percentile
             assert day.hr_95th_percentile <= day.hr_99th_percentile
 
-    def test_results_sorted_by_day(self, heartrate_data_list: list[dict]):
+    def test_results_sorted_by_day(self):
         """Test that results are sorted by day."""
         samples = [
-            HeartRateSample(
-                bpm=item["bpm"],
-                source=item["source"],
-                timestamp=item["timestamp"],
-            )
-            for item in heartrate_data_list
+            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-03T10:00:00+00:00"),
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        result = analyze_heart_rate_daily(df, sleep_intervals=[])
         
         days = [day.day for day in result]
         assert days == sorted(days)
@@ -516,26 +641,30 @@ class TestAnalyzeHeartRateDaily:
         heartrate_data = HeartRateData(data=[])
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        result = analyze_heart_rate_daily(df, sleep_intervals=[])
         
         assert result == []
 
-    def test_filters_to_active_sources_only(self):
-        """Test that only active source data (awake, live, workout) is used for daily analytics."""
+    def test_filters_out_sleep_periods(self):
+        """Test that HR samples during sleep are excluded from daily analytics."""
         samples = [
-            HeartRateSample(bpm=72, source="awake", timestamp="2025-01-01T08:00:00+00:00"),
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T02:00:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-02T02:00:00+00:00"),
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),   # During sleep
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
         
-        # Only one day with active data
-        assert len(result) == 1
-        assert result[0].day == date(2025, 1, 1)
-        assert result[0].average_hr == 72.0
+        result = analyze_heart_rate_daily(df, sleep_intervals)
+        
+        # Two days of data outside sleep
+        assert len(result) == 2
+        assert result[0].average_hr == 70.0
+        assert result[1].average_hr == 75.0
 
 
 class TestResampleHeartrate:
@@ -776,42 +905,52 @@ class TestResampleHeartrate:
         assert len(result) == 5
 
 
-class TestMergedStreamResampling:
-    """Tests for merged stream resampling behavior across sources."""
+class TestSleepBasedFiltering:
+    """Tests for sleep-based HR filtering behavior."""
 
-    def test_analyze_heart_rate_uses_merged_stream_for_segments(self):
-        """Test that analyze_heart_rate uses merged stream for segment detection."""
-        # Pattern: rest - awake - rest where awake would be isolated if filtered first
+    def test_analyze_heart_rate_excludes_sleep_periods(self):
+        """Test that analyze_heart_rate excludes data during sleep."""
         samples = [
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
-            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:04:00+00:00"),
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T08:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
         
-        # Should have non-None dates since there's active data
+        result = analyze_heart_rate(df, sleep_intervals)
+        
+        # Should have non-None dates since there's data outside sleep
         assert result.start_date is not None
         assert result.end_date is not None
-        assert result.average_hr == 75.0  # Only the awake sample
+        # Average should be from non-sleep samples only: (70 + 75) / 2 = 72.5
+        assert result.average_hr == 72.5
 
-    def test_analyze_heart_rate_daily_uses_merged_stream_for_segments(self):
-        """Test that analyze_heart_rate_daily uses merged stream for segment detection."""
+    def test_analyze_heart_rate_daily_excludes_sleep_periods(self):
+        """Test that analyze_heart_rate_daily excludes data during sleep."""
         samples = [
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
-            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:04:00+00:00"),
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T08:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate_daily(df)
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
+        ]
         
-        assert len(result) == 1
+        result = analyze_heart_rate_daily(df, sleep_intervals)
+        
+        assert len(result) == 2
         assert result[0].day == date(2025, 1, 1)
-        assert result[0].average_hr == 75.0  # Only the awake sample
+        assert result[0].average_hr == 70.0
+        assert result[1].day == date(2025, 1, 2)
+        assert result[1].average_hr == 75.0
 
     def test_analyze_heart_rate_custom_parameters(self):
         """Test that analyze_heart_rate accepts custom resampling parameters."""
@@ -823,11 +962,11 @@ class TestMergedStreamResampling:
         df = oura_heartrate_to_dataframe(heartrate_data)
         
         # With default parameters, should work
-        result_default = analyze_heart_rate(df)
+        result_default = analyze_heart_rate(df, sleep_intervals=[])
         assert result_default.start_date is not None
         
         # With custom max_gap_seconds=120, 3-minute gap creates separate segments
-        result_custom = analyze_heart_rate(df, max_gap_seconds=120)
+        result_custom = analyze_heart_rate(df, sleep_intervals=[], max_gap_seconds=120)
         assert result_custom.start_date is not None
 
     def test_analyze_heart_rate_daily_custom_parameters(self):
@@ -840,17 +979,16 @@ class TestMergedStreamResampling:
         df = oura_heartrate_to_dataframe(heartrate_data)
         
         # With default parameters
-        result_default = analyze_heart_rate_daily(df)
+        result_default = analyze_heart_rate_daily(df, sleep_intervals=[])
         assert len(result_default) == 1
         
         # With custom resample_interval
-        result_custom = analyze_heart_rate_daily(df, resample_interval="2min")
+        result_custom = analyze_heart_rate_daily(df, sleep_intervals=[], resample_interval="2min")
         assert len(result_custom) == 1
 
     def test_source_transitions_dont_break_resampling(self):
         """Test that source type changes don't create artificial gaps in resampling."""
         # Continuous data with source transitions every 2 minutes
-        # Without merged stream, this would create 3 segments
         samples = [
             HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
             HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
@@ -871,35 +1009,121 @@ class TestMergedStreamResampling:
             diff = (timestamps[i] - timestamps[i-1]).total_seconds()
             assert diff == 60  # All consecutive
 
-    def test_analyze_filters_to_active_sources_after_merged_resample(self):
-        """Test that analysis only includes active source timestamps after resampling."""
-        # The merged resample allows continuous data, but final stats should only
-        # include timestamps where active sources were present
+    def test_all_data_during_sleep_returns_empty(self):
+        """Test that data entirely during sleep returns empty result."""
         samples = [
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
-            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-01T10:01:00+00:00"),
-            HeartRateSample(bpm=80, source="awake", timestamp="2025-01-01T10:02:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:03:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),
+            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-02T02:00:00+00:00"),
         ]
         heartrate_data = HeartRateData(data=samples)
         df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
-        
-        # Average should be from awake timestamps only: (75 + 80) / 2 = 77.5
-        assert result.average_hr == 77.5
-
-    def test_only_rest_data_returns_empty_result(self):
-        """Test that data with only rest source returns empty result for active analysis."""
-        samples = [
-            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T10:00:00+00:00"),
-            HeartRateSample(bpm=52, source="rest", timestamp="2025-01-01T10:02:00+00:00"),
+        sleep_intervals = [
+            (pd.Timestamp("2025-01-01T22:00:00+00:00"), pd.Timestamp("2025-01-02T06:00:00+00:00"))
         ]
-        heartrate_data = HeartRateData(data=samples)
-        df = oura_heartrate_to_dataframe(heartrate_data)
         
-        result = analyze_heart_rate(df)
+        result = analyze_heart_rate(df, sleep_intervals)
         
         assert result.start_date is None
         assert result.end_date is None
         assert result.average_hr == 0.0
+
+
+class TestCombinedAnalytics:
+    """Tests for combined analytics functions."""
+
+    def test_analyze_combined_returns_both_sleep_and_hr(self):
+        """Test that analyze_combined returns both sleep and HR analytics."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        
+        hr_samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=hr_samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_combined(sleep_df, hr_df)
+        
+        assert isinstance(result, CombinedAnalytics)
+        assert isinstance(result.sleep, SleepAnalytics)
+        assert isinstance(result.heart_rate, HeartRateAnalytics)
+        assert result.sleep.nights_count == 1
+        assert result.heart_rate.average_hr == 72.5
+
+    def test_analyze_combined_filters_hr_during_sleep(self):
+        """Test that combined analytics filters HR during sleep."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        
+        hr_samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=55, source="rest", timestamp="2025-01-01T23:00:00+00:00"),  # During sleep
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=hr_samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_combined(sleep_df, hr_df)
+        
+        # HR during sleep should be excluded
+        assert result.heart_rate.average_hr == 72.5  # (70 + 75) / 2
+
+    def test_analyze_combined_daily_returns_daily_hr(self):
+        """Test that analyze_combined_daily returns daily HR analytics."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        
+        hr_samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=hr_samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        result = analyze_combined_daily(sleep_df, hr_df)
+        
+        assert isinstance(result, CombinedDailyAnalytics)
+        assert len(result.days) == 2
+        assert result.days[0].average_hr == 70.0
+        assert result.days[1].average_hr == 75.0

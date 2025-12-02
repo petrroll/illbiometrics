@@ -1,15 +1,12 @@
 """Sleep data analytics module. No external API dependencies."""
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 import pandas as pd
 import numpy as np
 
 from app.oura_client import SleepData, HeartRateData
-
-# Sources considered "active" heart rate (not resting/sleep)
-NON_SLEEP_HR_SOURCES = {"awake", "live", "workout"}
 
 # Default maximum gap (in seconds) between consecutive HR points to consider them connected
 # Points further apart than this are not interpolated between
@@ -62,6 +59,7 @@ class HeartRateAnalytics:
     start_date: Optional[date]
     end_date: Optional[date]
     hours_with_good_data: int
+    sleep_hours_filtered: float
     average_hr: float
     average_hr_std: float
     hr_20th_percentile: float
@@ -77,6 +75,7 @@ class HeartRateAnalytics:
             start_date=None,
             end_date=None,
             hours_with_good_data=0,
+            sleep_hours_filtered=0.0,
             average_hr=0.0,
             average_hr_std=0.0,
             hr_20th_percentile=0.0,
@@ -98,7 +97,6 @@ class DailyHeartRateAnalytics:
     hr_95th_percentile: float
     hr_99th_percentile: float
 
-
 # Only include "long_sleep" type for nightly sleep analytics.
 # Sleep type statistics from historical data:
 # | Type       | Count | Avg Duration | Avg Start Time |
@@ -118,6 +116,8 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
             "id": sleep.id,
             "day": sleep.day,
             "type": sleep.type,
+            "bedtime_start": sleep.bedtime_start,
+            "bedtime_end": sleep.bedtime_end,
             "total_sleep_duration": sleep.total_sleep_duration,
             "average_heart_rate": sleep.average_heart_rate,
             "average_hrv": sleep.average_hrv,
@@ -126,6 +126,75 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
         }
         records.append(record)
     return pd.DataFrame(records)
+
+
+def get_sleep_intervals(sleep_df: pd.DataFrame) -> list[tuple[datetime, datetime]]:
+    """Extract sleep time intervals from sleep DataFrame.
+    
+    Only considers 'long_sleep' type entries (actual overnight sleep).
+    
+    Args:
+        sleep_df: DataFrame with 'type', 'bedtime_start', 'bedtime_end' columns.
+    
+    Returns:
+        List of (start, end) datetime tuples representing sleep periods.
+    """
+    if sleep_df.empty:
+        return []
+    
+    # Filter to long_sleep type only
+    if "type" in sleep_df.columns:
+        sleep_df = sleep_df[sleep_df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+    
+    intervals = []
+    for _, row in sleep_df.iterrows():
+        start = row.get("bedtime_start")
+        end = row.get("bedtime_end")
+        if start and end:
+            try:
+                start_dt = pd.to_datetime(start)
+                end_dt = pd.to_datetime(end)
+                intervals.append((start_dt, end_dt))
+            except (ValueError, TypeError):
+                continue
+    
+    return intervals
+
+
+def filter_hr_outside_sleep(hr_df: pd.DataFrame, sleep_intervals: list[tuple[datetime, datetime]]) -> tuple[pd.DataFrame, float]:
+    """Filter heart rate DataFrame to exclude samples during sleep periods.
+    
+    Note: This implementation is O(n_samples * n_intervals) which scales poorly with
+    many sleep intervals. However, this is acceptable for now because:
+    - We have very few users
+    - Oura history is typically not that long
+    - We expect to analyze ~1 month of data at a time (so ~30 sleep intervals max)
+    
+    Args:
+        hr_df: DataFrame with 'timestamp' column.
+        sleep_intervals: List of (start, end) datetime tuples representing sleep periods.
+    
+    Returns:
+        Tuple of (filtered DataFrame, total sleep hours filtered out).
+    """
+    # Calculate total sleep hours from intervals
+    total_sleep_hours = sum(
+        (end - start).total_seconds() / 3600
+        for start, end in sleep_intervals
+    )
+    
+    if hr_df.empty or not sleep_intervals:
+        return hr_df, total_sleep_hours
+    
+    # Create a mask for samples that are NOT during any sleep period
+    mask = pd.Series(True, index=hr_df.index)
+    
+    for start, end in sleep_intervals:
+        # Mark samples during this sleep period as False
+        sleep_mask = (hr_df["timestamp"] >= start) & (hr_df["timestamp"] <= end)
+        mask = mask & ~sleep_mask
+    
+    return hr_df[mask].copy(), total_sleep_hours
 
 
 def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
@@ -293,46 +362,37 @@ def resample_heartrate(
 
 
 def analyze_heart_rate(
-    df: pd.DataFrame,
+    hr_df: pd.DataFrame,
+    sleep_intervals: list[tuple[datetime, datetime]],
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> HeartRateAnalytics:
-    """Compute aggregate heart rate analytics from DataFrame (active heart rate only).
+    """Compute aggregate heart rate analytics from DataFrame (excluding sleep periods).
     
-    Resamples ALL sources as a merged stream to ensure continuous data across
-    source transitions, then filters to only include timestamps that had active
-    sources (awake, live, workout) in the original data.
+    Filters out HR samples that occur during sleep periods, then resamples.
     
     Args:
-        df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        hr_df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        sleep_intervals: List of (start, end) datetime tuples representing sleep periods.
         max_gap_seconds: Maximum gap in seconds between consecutive points to consider 
             them connected during resampling. Default is 300 seconds (5 minutes).
         resample_interval: Pandas frequency string for resampling interval.
             Default is "1min".
     
     Returns:
-        HeartRateAnalytics with aggregate statistics from active HR data.
+        HeartRateAnalytics with aggregate statistics from non-sleep HR data.
     """
-    if df.empty:
+    if hr_df.empty:
         return HeartRateAnalytics.empty()
     
-    # Get timestamps that have active sources
-    active_timestamps = set(
-        df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES), "timestamp"]
-        .dt.floor(resample_interval)
-    )
+    # Filter out HR samples during sleep periods
+    filtered_df, sleep_hours_filtered = filter_hr_outside_sleep(hr_df, sleep_intervals)
     
-    if not active_timestamps:
+    if filtered_df.empty:
         return HeartRateAnalytics.empty()
     
-    # Resample ALL sources as a merged stream
-    resampled_df = resample_heartrate(df, max_gap_seconds, resample_interval)
-    
-    if resampled_df.empty:
-        return HeartRateAnalytics.empty()
-    
-    # Filter resampled data to only timestamps that had active sources
-    resampled_df = resampled_df[resampled_df["timestamp"].isin(active_timestamps)]
+    # Resample the filtered data
+    resampled_df = resample_heartrate(filtered_df, max_gap_seconds, resample_interval)
     
     if resampled_df.empty:
         return HeartRateAnalytics.empty()
@@ -348,6 +408,7 @@ def analyze_heart_rate(
     average_hr_std = float(np.std(hr_values)) if len(hr_values) > 0 else 0.0
     
     # Count hours with more than 10 samples (based on resampled data)
+    resampled_df = resampled_df.copy()
     resampled_df["hour"] = resampled_df["timestamp"].dt.floor("h")
     hourly_counts = resampled_df.groupby("hour").size()
     hours_with_good_data = int((hourly_counts > 10).sum())
@@ -356,6 +417,7 @@ def analyze_heart_rate(
         start_date=actual_start,
         end_date=actual_end,
         hours_with_good_data=hours_with_good_data,
+        sleep_hours_filtered=float(round(sleep_hours_filtered, 1)),
         average_hr=float(round(average_hr, 1)),
         average_hr_std=float(round(average_hr_std, 1)),
         hr_20th_percentile=float(round(np.percentile(hr_values, 20), 1)),
@@ -367,18 +429,18 @@ def analyze_heart_rate(
 
 
 def analyze_heart_rate_daily(
-    df: pd.DataFrame,
+    hr_df: pd.DataFrame,
+    sleep_intervals: list[tuple[datetime, datetime]],
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> list[DailyHeartRateAnalytics]:
-    """Compute daily heart rate analytics from DataFrame (active heart rate only).
+    """Compute daily heart rate analytics from DataFrame (excluding sleep periods).
     
-    Resamples ALL sources as a merged stream to ensure continuous data across
-    source transitions, then filters to only include timestamps that had active
-    sources (awake, live, workout) in the original data.
+    Filters out HR samples that occur during sleep periods, then resamples.
     
     Args:
-        df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        hr_df: DataFrame with 'timestamp', 'bpm', 'source', 'day' columns.
+        sleep_intervals: List of (start, end) datetime tuples representing sleep periods.
         max_gap_seconds: Maximum gap in seconds between consecutive points to consider 
             them connected during resampling. Default is 300 seconds (5 minutes).
         resample_interval: Pandas frequency string for resampling interval.
@@ -387,26 +449,17 @@ def analyze_heart_rate_daily(
     Returns:
         List of DailyHeartRateAnalytics sorted by day.
     """
-    if df.empty:
+    if hr_df.empty:
         return []
     
-    # Get timestamps that have active sources
-    active_timestamps = set(
-        df.loc[df["source"].isin(NON_SLEEP_HR_SOURCES), "timestamp"]
-        .dt.floor(resample_interval)
-    )
+    # Filter out HR samples during sleep periods
+    filtered_df, _ = filter_hr_outside_sleep(hr_df, sleep_intervals)
     
-    if not active_timestamps:
+    if filtered_df.empty:
         return []
     
-    # Resample ALL sources as a merged stream
-    resampled_df = resample_heartrate(df, max_gap_seconds, resample_interval)
-    
-    if resampled_df.empty:
-        return []
-    
-    # Filter resampled data to only timestamps that had active sources
-    resampled_df = resampled_df[resampled_df["timestamp"].isin(active_timestamps)]
+    # Resample the filtered data
+    resampled_df = resample_heartrate(filtered_df, max_gap_seconds, resample_interval)
     
     if resampled_df.empty:
         return []
@@ -431,3 +484,67 @@ def analyze_heart_rate_daily(
     results.sort(key=lambda x: x.day)
     return results
 
+
+@dataclass
+class CombinedAnalytics:
+    """Combined sleep and heart rate analytics."""
+    sleep: SleepAnalytics
+    heart_rate: HeartRateAnalytics
+
+
+@dataclass
+class CombinedDailyAnalytics:
+    """Combined daily analytics."""
+    days: list[DailyHeartRateAnalytics]
+
+
+def analyze_combined(
+    sleep_df: pd.DataFrame,
+    hr_df: pd.DataFrame,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> CombinedAnalytics:
+    """Compute combined sleep and heart rate analytics.
+    
+    Uses sleep periods from sleep_df to filter out HR samples during sleep.
+    
+    Args:
+        sleep_df: DataFrame with sleep data (from oura_sleep_to_dataframe).
+        hr_df: DataFrame with heart rate data (from oura_heartrate_to_dataframe).
+        max_gap_seconds: Maximum gap in seconds between consecutive HR points.
+        resample_interval: Pandas frequency string for HR resampling interval.
+    
+    Returns:
+        CombinedAnalytics with both sleep and heart rate analytics.
+    """
+    sleep_analytics = analyze_sleep(sleep_df)
+    
+    sleep_intervals = get_sleep_intervals(sleep_df)
+    hr_analytics = analyze_heart_rate(hr_df, sleep_intervals, max_gap_seconds, resample_interval)
+    
+    return CombinedAnalytics(sleep=sleep_analytics, heart_rate=hr_analytics)
+
+
+def analyze_combined_daily(
+    sleep_df: pd.DataFrame,
+    hr_df: pd.DataFrame,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> CombinedDailyAnalytics:
+    """Compute combined daily analytics.
+    
+    Uses sleep periods from sleep_df to filter out HR samples during sleep.
+    
+    Args:
+        sleep_df: DataFrame with sleep data (from oura_sleep_to_dataframe).
+        hr_df: DataFrame with heart rate data (from oura_heartrate_to_dataframe).
+        max_gap_seconds: Maximum gap in seconds between consecutive HR points.
+        resample_interval: Pandas frequency string for HR resampling interval.
+    
+    Returns:
+        CombinedDailyAnalytics with daily heart rate analytics.
+    """
+    sleep_intervals = get_sleep_intervals(sleep_df)
+    daily_hr = analyze_heart_rate_daily(hr_df, sleep_intervals, max_gap_seconds, resample_interval)
+    
+    return CombinedDailyAnalytics(days=daily_hr)
