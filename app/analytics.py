@@ -498,6 +498,27 @@ class CombinedDailyAnalytics:
     days: list[DailyHeartRateAnalytics]
 
 
+@dataclass
+class PeriodComparisonResult:
+    """Result of comparing two time periods (e.g., pre/post treatment)."""
+    pre_period: CombinedAnalytics
+    post_period: CombinedAnalytics
+    # Period date ranges
+    pre_start: date
+    pre_end: date
+    post_start: date
+    post_end: date
+    # Deltas (post - pre)
+    sleep_duration_diff: float  # seconds
+    median_hr_diff: float  # bpm (during sleep)
+    median_hrv_diff: float  # ms (during sleep)
+    hr_50th_percentile_diff: float  # bpm (waking)
+    # Significance assessment
+    suggested_effect: str  # "improved", "worsened", "no_effect"
+    significant_change: bool
+    significance_details: str  # Explanation of what changed significantly
+
+
 def analyze_combined(
     sleep_df: pd.DataFrame,
     hr_df: pd.DataFrame,
@@ -548,3 +569,129 @@ def analyze_combined_daily(
     daily_hr = analyze_heart_rate_daily(hr_df, sleep_intervals, max_gap_seconds, resample_interval)
     
     return CombinedDailyAnalytics(days=daily_hr)
+
+
+def compare_periods(
+    pre_sleep_df: pd.DataFrame,
+    post_sleep_df: pd.DataFrame,
+    pre_hr_df: pd.DataFrame,
+    post_hr_df: pd.DataFrame,
+    pre_start: date,
+    pre_end: date,
+    post_start: date,
+    post_end: date,
+    max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
+    resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
+) -> PeriodComparisonResult:
+    """Compare biometric data between two time periods.
+    
+    Useful for assessing treatment effects by comparing pre-treatment vs post-treatment periods.
+    Uses 2-sigma rule: changes beyond 2x standard deviation of baseline are significant.
+    
+    Args:
+        pre_sleep_df: DataFrame with pre-period sleep data (from oura_sleep_to_dataframe).
+        post_sleep_df: DataFrame with post-period sleep data (from oura_sleep_to_dataframe).
+        pre_hr_df: DataFrame with pre-period heart rate data (from oura_heartrate_to_dataframe).
+        post_hr_df: DataFrame with post-period heart rate data (from oura_heartrate_to_dataframe).
+        pre_start: Start date of pre-treatment period.
+        pre_end: End date of pre-treatment period.
+        post_start: Start date of post-treatment period.
+        post_end: End date of post-treatment period.
+        max_gap_seconds: Maximum gap in seconds between consecutive HR points.
+        resample_interval: Pandas frequency string for HR resampling interval.
+    
+    Returns:
+        PeriodComparisonResult with comparison metrics and significance assessment.
+    """
+    # Analyze each period
+    pre_analytics = analyze_combined(pre_sleep_df, pre_hr_df, max_gap_seconds, resample_interval)
+    post_analytics = analyze_combined(post_sleep_df, post_hr_df, max_gap_seconds, resample_interval)
+    
+    # Calculate deltas
+    sleep_duration_diff = post_analytics.sleep.median_sleep_duration - pre_analytics.sleep.median_sleep_duration
+    median_hr_diff = post_analytics.sleep.median_avg_hr - pre_analytics.sleep.median_avg_hr
+    median_hrv_diff = post_analytics.sleep.median_avg_hrv - pre_analytics.sleep.median_avg_hrv
+    hr_50th_diff = post_analytics.heart_rate.hr_50th_percentile - pre_analytics.heart_rate.hr_50th_percentile
+    
+    # Assess significance using 2-sigma rule
+    # For each metric, check if the change exceeds 2x the baseline std
+    significant_changes = []
+    
+    # Sleep duration: significant if change > 2 * std
+    if pre_analytics.sleep.sleep_duration_std > 0:
+        if abs(sleep_duration_diff) > 2 * pre_analytics.sleep.sleep_duration_std:
+            direction = "increased" if sleep_duration_diff > 0 else "decreased"
+            significant_changes.append(f"Sleep duration {direction}")
+    
+    # Sleep HR: significant if change > 2 * std
+    if pre_analytics.sleep.avg_hr_std > 0:
+        if abs(median_hr_diff) > 2 * pre_analytics.sleep.avg_hr_std:
+            direction = "increased" if median_hr_diff > 0 else "decreased"
+            significant_changes.append(f"Sleep heart rate {direction}")
+    
+    # Sleep HRV: significant if change > 2 * std
+    if pre_analytics.sleep.avg_hrv_std > 0:
+        if abs(median_hrv_diff) > 2 * pre_analytics.sleep.avg_hrv_std:
+            direction = "increased" if median_hrv_diff > 0 else "decreased"
+            significant_changes.append(f"Heart rate variability {direction}")
+    
+    # Waking HR: significant if change > 2 * std
+    if pre_analytics.heart_rate.average_hr_std > 0:
+        if abs(hr_50th_diff) > 2 * pre_analytics.heart_rate.average_hr_std:
+            direction = "increased" if hr_50th_diff > 0 else "decreased"
+            significant_changes.append(f"Waking heart rate {direction}")
+    
+    significant_change = len(significant_changes) > 0
+    significance_details = "; ".join(significant_changes) if significant_changes else "No significant changes detected"
+    
+    # Determine suggested effect
+    # Improved: lower HR (sleep or waking), higher HRV, or longer sleep
+    # Worsened: higher HR, lower HRV, or shorter sleep
+    improvement_score = 0
+    if significant_change:
+        # Lower HR is generally better
+        if median_hr_diff < 0 and "Sleep heart rate" in significance_details:
+            improvement_score += 1
+        elif median_hr_diff > 0 and "Sleep heart rate" in significance_details:
+            improvement_score -= 1
+        
+        if hr_50th_diff < 0 and "Waking heart rate" in significance_details:
+            improvement_score += 1
+        elif hr_50th_diff > 0 and "Waking heart rate" in significance_details:
+            improvement_score -= 1
+        
+        # Higher HRV is generally better
+        if median_hrv_diff > 0 and "Heart rate variability" in significance_details:
+            improvement_score += 1
+        elif median_hrv_diff < 0 and "Heart rate variability" in significance_details:
+            improvement_score -= 1
+        
+        # Longer sleep is generally better (within reason)
+        if sleep_duration_diff > 0 and "Sleep duration" in significance_details:
+            improvement_score += 1
+        elif sleep_duration_diff < 0 and "Sleep duration" in significance_details:
+            improvement_score -= 1
+    
+    if improvement_score > 0:
+        suggested_effect = "improved"
+    elif improvement_score < 0:
+        suggested_effect = "worsened"
+    else:
+        suggested_effect = "no_effect"
+    
+    return PeriodComparisonResult(
+        pre_period=pre_analytics,
+        post_period=post_analytics,
+        pre_start=pre_start,
+        pre_end=pre_end,
+        post_start=post_start,
+        post_end=post_end,
+        sleep_duration_diff=float(round(sleep_duration_diff, 2)),
+        median_hr_diff=float(round(median_hr_diff, 1)),
+        median_hrv_diff=float(round(median_hrv_diff, 1)),
+        hr_50th_percentile_diff=float(round(hr_50th_diff, 1)),
+        suggested_effect=suggested_effect,
+        significant_change=significant_change,
+        significance_details=significance_details,
+    )
+

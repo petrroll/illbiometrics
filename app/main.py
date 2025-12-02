@@ -1,4 +1,5 @@
 import argparse
+import calendar
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -6,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -22,6 +24,7 @@ from app.analytics import (
     oura_heartrate_to_dataframe,
     analyze_combined,
     analyze_combined_daily,
+    compare_periods,
 )
 
 # Create routers for grouping endpoints
@@ -171,6 +174,127 @@ async def combined_analytics(
         raise HTTPException(status_code=401, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@analytics_router.get("/treatment-comparison")
+async def treatment_comparison(
+    treatment_month: str = Query(..., description="Month treatment started (YYYY-MM format)"),
+    pre_month: Optional[str] = Query(None, description="Pre-treatment month (YYYY-MM), defaults to month before treatment"),
+    post_month: Optional[str] = Query(None, description="Post-treatment month (YYYY-MM), defaults to month after treatment"),
+):
+    """
+    Compare biometric data before and after a treatment start date.
+    
+    Compares the full calendar month before treatment vs the full calendar month after.
+    For example, if treatment started in March 2025, compares February 2025 vs April 2025.
+    
+    Returns comparison of sleep and heart rate metrics with significance assessment.
+    """
+    if oura_client is None:
+        raise HTTPException(status_code=500, detail="Client not initialized")
+    
+    try:
+        # Parse treatment month
+        treatment_year, treatment_month_num = map(int, treatment_month.split("-"))
+        
+        # Calculate pre and post months (full calendar months)
+        if pre_month:
+            pre_year, pre_month_num = map(int, pre_month.split("-"))
+        else:
+            # Default: month before treatment
+            if treatment_month_num == 1:
+                pre_year, pre_month_num = treatment_year - 1, 12
+            else:
+                pre_year, pre_month_num = treatment_year, treatment_month_num - 1
+        
+        if post_month:
+            post_year, post_month_num = map(int, post_month.split("-"))
+        else:
+            # Default: month after treatment
+            if treatment_month_num == 12:
+                post_year, post_month_num = treatment_year + 1, 1
+            else:
+                post_year, post_month_num = treatment_year, treatment_month_num + 1
+        
+        # Get full date ranges for each month
+        pre_start = date(pre_year, pre_month_num, 1)
+        pre_end = date(pre_year, pre_month_num, calendar.monthrange(pre_year, pre_month_num)[1])
+        post_start = date(post_year, post_month_num, 1)
+        post_end = date(post_year, post_month_num, calendar.monthrange(post_year, post_month_num)[1])
+        
+        # Fetch data for each period separately (Oura API limits to 30 days per request)
+        pre_sleep_data, _, _ = await oura_client.get_sleep_data(pre_start, pre_end)
+        pre_hr_data, _, _ = await oura_client.get_heartrate_data(pre_start, pre_end)
+        post_sleep_data, _, _ = await oura_client.get_sleep_data(post_start, post_end)
+        post_hr_data, _, _ = await oura_client.get_heartrate_data(post_start, post_end)
+        
+        # Prepare DataFrames for compare_periods
+        pre_sleep_df = oura_sleep_to_dataframe(pre_sleep_data)
+        post_sleep_df = oura_sleep_to_dataframe(post_sleep_data)
+        pre_hr_df = oura_heartrate_to_dataframe(pre_hr_data)
+        post_hr_df = oura_heartrate_to_dataframe(post_hr_data)
+        
+        # Compare periods
+        comparison = compare_periods(
+            pre_sleep_df, post_sleep_df,
+            pre_hr_df, post_hr_df,
+            pre_start, pre_end,
+            post_start, post_end
+        )
+        
+        # Helper to format period analytics
+        def format_combined_analytics(analytics):
+            return {
+                "sleep": {
+                    "start_date": str(analytics.sleep.start_date) if analytics.sleep.start_date else None,
+                    "end_date": str(analytics.sleep.end_date) if analytics.sleep.end_date else None,
+                    "nights_count": analytics.sleep.nights_count,
+                    "median_sleep_duration": analytics.sleep.median_sleep_duration,
+                    "sleep_duration_std": analytics.sleep.sleep_duration_std,
+                    "median_avg_hr": analytics.sleep.median_avg_hr,
+                    "avg_hr_std": analytics.sleep.avg_hr_std,
+                    "median_avg_hrv": analytics.sleep.median_avg_hrv,
+                    "avg_hrv_std": analytics.sleep.avg_hrv_std,
+                },
+                "heart_rate": {
+                    "start_date": str(analytics.heart_rate.start_date) if analytics.heart_rate.start_date else None,
+                    "end_date": str(analytics.heart_rate.end_date) if analytics.heart_rate.end_date else None,
+                    "hours_with_good_data": analytics.heart_rate.hours_with_good_data,
+                    "average_hr": analytics.heart_rate.average_hr,
+                    "average_hr_std": analytics.heart_rate.average_hr_std,
+                    "hr_50th_percentile": analytics.heart_rate.hr_50th_percentile,
+                },
+            }
+        
+        return {
+            "data_source": oura_client.data_source.value,
+            "treatment_month": treatment_month,
+            "pre_period": {
+                "start_date": str(comparison.pre_start),
+                "end_date": str(comparison.pre_end),
+                "analytics": format_combined_analytics(comparison.pre_period),
+            },
+            "post_period": {
+                "start_date": str(comparison.post_start),
+                "end_date": str(comparison.post_end),
+                "analytics": format_combined_analytics(comparison.post_period),
+            },
+            "comparison": {
+                "sleep_duration_diff": comparison.sleep_duration_diff,
+                "median_hr_diff": comparison.median_hr_diff,
+                "median_hrv_diff": comparison.median_hrv_diff,
+                "hr_50th_percentile_diff": comparison.hr_50th_percentile_diff,
+                "suggested_effect": comparison.suggested_effect,
+                "significant_change": comparison.significant_change,
+                "significance_details": comparison.significance_details,
+            },
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {e}")
+    except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

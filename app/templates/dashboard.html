@@ -56,6 +56,14 @@
 
         <!-- Analytics Cards -->
         <div id="analytics" class="hidden space-y-6">
+            <!-- Data Quality Warning -->
+            <div id="dataQualityWarning" class="hidden bg-amber-100 border border-amber-400 text-amber-800 px-4 py-3 rounded flex items-center gap-2">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <span id="dataQualityWarningText">Limited data coverage. Analysis may be less reliable.</span>
+            </div>
+
             <!-- Sleep Analytics -->
             <div class="bg-white rounded-lg shadow p-6">
                 <div class="flex justify-between items-center mb-4">
@@ -139,12 +147,168 @@
                     <pre class="bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 text-xs"></pre>
                 </div>
             </div>
+
+            <!-- Treatment Analysis Widget -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">💊 Treatment Effect Analysis</h2>
+                <p class="text-sm text-gray-500 mb-4">Analyze how a treatment affected your biometrics by comparing the month before you started vs. the month after.</p>
+                
+                <!-- Treatment Input Form -->
+                <div class="space-y-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Treatment Name</label>
+                        <input type="text" id="treatmentName" placeholder="Start typing to search treatments..." 
+                               class="w-full border rounded px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Treatment Start Month *</label>
+                            <input type="month" id="treatmentMonth" 
+                                   class="w-full border rounded px-3 py-2 text-gray-700" 
+                                   onchange="onTreatmentMonthChange()" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Pre-Period Month</label>
+                            <input type="month" id="preMonth" 
+                                   class="w-full border rounded px-3 py-2 text-gray-700"
+                                   onchange="onPeriodMonthChange()" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Post-Period Month</label>
+                            <input type="month" id="postMonth" 
+                                   class="w-full border rounded px-3 py-2 text-gray-700"
+                                   onchange="onPeriodMonthChange()" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Treatment Loading -->
+                <div id="treatmentLoading" class="hidden text-center py-4">
+                    <div class="inline-block animate-spin rounded-full h-6 w-6 border-4 border-indigo-600 border-t-transparent"></div>
+                    <span class="text-gray-600 ml-2">Analyzing...</span>
+                </div>
+
+                <!-- Treatment Error -->
+                <div id="treatmentError" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4"></div>
+
+                <!-- Treatment Results (visible by default with empty state) -->
+                <div id="treatmentResults">
+                    <!-- Data Quality Warning for Treatment -->
+                    <div id="treatmentDataWarning" class="hidden bg-amber-100 border border-amber-400 text-amber-800 px-4 py-3 rounded mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        </svg>
+                        <span id="treatmentDataWarningText"></span>
+                    </div>
+
+                    <!-- Comparison Section (hidden until analysis complete) -->
+                    <div id="comparisonSection" class="hidden">
+                        <!-- Comparison Grid -->
+                        <div class="mb-6">
+                            <h3 class="text-lg font-medium text-gray-700 mb-3">Before vs. After Comparison</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead>
+                                        <tr class="border-b">
+                                            <th class="text-left py-2 px-3 font-medium text-gray-600">Metric</th>
+                                            <th class="text-center py-2 px-3 font-medium text-gray-600" id="preMonthHeader">Before</th>
+                                            <th class="text-center py-2 px-3 font-medium text-gray-600" id="postMonthHeader">After</th>
+                                            <th class="text-center py-2 px-3 font-medium text-gray-600">Change</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comparisonTable">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Significance Summary -->
+                        <div id="significanceSummary" class="mb-6 p-4 rounded border border-gray-300 bg-gray-50">
+                            <p id="significanceText" class="font-medium text-gray-700"></p>
+                        </div>
+                    </div>
+
+                    <!-- Treatment Type Selection -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-sm font-medium text-gray-700">Treatment Type *</label>
+                            <button id="applySuggestedBtn" onclick="applySuggestedAnalysis()" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-medium text-sm">
+                                Apply: Successful (3/6)
+                            </button>
+                        </div>
+                        <div class="flex gap-3">
+                            <button type="button" id="btnSuccessful" onclick="selectTreatmentType('successful', true)" 
+                                    class="flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-gray-300 bg-white hover:bg-gray-50">
+                                <div class="font-semibold">Successful</div>
+                                <div class="text-sm text-gray-500">Helped</div>
+                            </button>
+                            <button type="button" id="btnHarmful" onclick="selectTreatmentType('harmful', true)" 
+                                    class="flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-gray-300 bg-white hover:bg-gray-50">
+                                <div class="font-semibold">Harmful</div>
+                                <div class="text-sm text-gray-500">Caused harm</div>
+                            </button>
+                            <button type="button" id="btnNoEffect" onclick="selectTreatmentType('no_effect', true)" 
+                                    class="flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-blue-500 bg-blue-50">
+                                <div class="font-semibold">No Effect</div>
+                                <div class="text-sm text-gray-500">No change</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Effectiveness Slider -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Effectiveness Level * (<span id="effectivenessValue">1</span>/6)</label>
+                        <input type="range" id="effectivenessSlider" min="1" max="6" value="1" 
+                               class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                               oninput="updateEffectivenessLabel()" />
+                        <div id="effectivenessLabel" class="mt-2 p-3 bg-gray-50 rounded text-sm text-gray-700">
+                            0-10% improvement
+                        </div>
+                    </div>
+
+                    <!-- Additional Info -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Additional Info</label>
+                        <textarea id="additionalInfo" rows="4" 
+                                  class="w-full border rounded px-3 py-2 text-gray-700 font-mono text-xs"
+                                  placeholder="Analysis summary will appear here..."></textarea>
+                    </div>
+
+                    <!-- User Feedback Section -->
+                    <div class="border-t pt-4">
+                        <div class="flex items-start gap-3 mb-4">
+                            <input type="checkbox" id="analysisMatches" class="mt-1" onchange="toggleMismatchNote()" checked />
+                            <label for="analysisMatches" class="text-sm text-gray-700">
+                                This analysis matches my experience
+                            </label>
+                        </div>
+                        <div id="mismatchNote" class="hidden mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">What was different? (optional)</label>
+                            <textarea id="mismatchReason" rows="2" 
+                                      class="w-full border rounded px-3 py-2 text-gray-700 text-sm"
+                                      placeholder="e.g., I felt improvement but it was due to other lifestyle changes..."></textarea>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="submitTreatment()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded font-medium">
+                                Submit Treatment Record
+                            </button>
+                        </div>
+                        <p id="submitSuccess" class="hidden text-green-600 mt-2 text-sm">✓ Treatment record saved (demo only)</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
         let rawSleepData = null;
         let rawHrData = null;
+        let selectedTreatmentType = 'no_effect';
+        let treatmentComparisonData = null;
+        let userHasModifiedTreatmentType = false;
+        let suggestedTreatmentType = 'no_effect';
+        let suggestedEffectiveness = 1;
 
         /**
          * Initialize the month picker with the current month (limits to current or earlier months).
@@ -292,6 +456,24 @@
                 document.querySelector('#sleepRaw pre').textContent = JSON.stringify(rawSleepData, null, 2);
                 document.querySelector('#hrRaw pre').textContent = JSON.stringify(rawHrData, null, 2);
 
+                // Check data quality and show warning if needed (calculated UI-side)
+                // Expected: 12 waking hours per day, warn if < 20% coverage
+                const startDateObj = new Date(sleepData.start_date);
+                const endDateObj = new Date(sleepData.end_date);
+                const daysInRange = Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24)) + 1;
+                const expectedHours = daysInRange * 12; // 12 waking hours per day
+                const dataCoveragePct = expectedHours > 0 ? (hrData.hours_with_good_data / expectedHours * 100) : 0;
+                const dataSufficient = dataCoveragePct >= 20;
+                
+                const dataQualityWarning = document.getElementById('dataQualityWarning');
+                const dataQualityWarningText = document.getElementById('dataQualityWarningText');
+                if (!dataSufficient) {
+                    dataQualityWarningText.textContent = `Limited data coverage (${formatNumber(dataCoveragePct)}%). Analysis may be less reliable.`;
+                    dataQualityWarning.classList.remove('hidden');
+                } else {
+                    dataQualityWarning.classList.add('hidden');
+                }
+
                 document.getElementById('analytics').classList.remove('hidden');
             } catch (err) {
                 document.getElementById('error').textContent = 'Error: ' + err.message;
@@ -300,6 +482,361 @@
                 document.getElementById('loading').classList.add('hidden');
             }
         }
+
+        // === Treatment Analysis Functions ===
+
+        function initTreatmentMonthPicker() {
+            const picker = document.getElementById('treatmentMonth');
+            const prePicker = document.getElementById('preMonth');
+            const postPicker = document.getElementById('postMonth');
+            if (!picker) return;
+            
+            const today = new Date();
+            // Set max to 2 months ago (need at least 1 month after for comparison)
+            const maxDate = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+            const maxValue = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, '0')}`;
+            
+            picker.max = maxValue;
+            prePicker.max = maxValue;
+            postPicker.max = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+            
+            // Initialize with default "no effect" state
+            selectTreatmentType('no_effect');
+        }
+
+        function onTreatmentMonthChange() {
+            const picker = document.getElementById('treatmentMonth');
+            const value = picker?.value;
+            if (!value) return;
+            
+            const [year, month] = value.split('-').map(Number);
+            
+            // Calculate pre month (month before treatment)
+            let preYear = year, preMonth = month - 1;
+            if (preMonth === 0) {
+                preYear--;
+                preMonth = 12;
+            }
+            
+            // Calculate post month (month after treatment)
+            let postYear = year, postMonth = month + 1;
+            if (postMonth === 13) {
+                postYear++;
+                postMonth = 1;
+            }
+            
+            document.getElementById('preMonth').value = `${preYear}-${String(preMonth).padStart(2, '0')}`;
+            document.getElementById('postMonth').value = `${postYear}-${String(postMonth).padStart(2, '0')}`;
+            
+            // Auto-trigger analysis
+            analyzeTreatment();
+        }
+
+        function onPeriodMonthChange() {
+            // Re-analyze when user changes pre/post month
+            const treatmentMonth = document.getElementById('treatmentMonth').value;
+            if (treatmentMonth) {
+                analyzeTreatment();
+            }
+        }
+
+        async function analyzeTreatment() {
+            const treatmentMonth = document.getElementById('treatmentMonth').value;
+            const preMonth = document.getElementById('preMonth').value;
+            const postMonth = document.getElementById('postMonth').value;
+            
+            if (!treatmentMonth) {
+                return;
+            }
+            
+            document.getElementById('treatmentLoading').classList.remove('hidden');
+            document.getElementById('treatmentError').classList.add('hidden');
+            
+            try {
+                const params = new URLSearchParams({
+                    treatment_month: treatmentMonth,
+                });
+                if (preMonth) params.append('pre_month', preMonth);
+                if (postMonth) params.append('post_month', postMonth);
+                
+                const response = await fetch('/analytics/treatment-comparison?' + params.toString());
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to analyze treatment');
+                }
+                
+                treatmentComparisonData = await response.json();
+                displayTreatmentResults(treatmentComparisonData);
+                
+            } catch (err) {
+                document.getElementById('treatmentError').textContent = 'Error: ' + err.message;
+                document.getElementById('treatmentError').classList.remove('hidden');
+            } finally {
+                document.getElementById('treatmentLoading').classList.add('hidden');
+            }
+        }
+
+        function displayTreatmentResults(data) {
+            const pre = data.pre_period;
+            const post = data.post_period;
+            const comparison = data.comparison;
+            
+            // Update header labels
+            document.getElementById('preMonthHeader').textContent = `Before (${pre.start_date.substring(0, 7)})`;
+            document.getElementById('postMonthHeader').textContent = `After (${post.start_date.substring(0, 7)})`;
+            
+            // Calculate data quality on UI side
+            // Expected: 12 waking hours per day, warn if < 20% coverage
+            function calcDataCoverage(period) {
+                const start = new Date(period.start_date);
+                const end = new Date(period.end_date);
+                const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                const expectedHours = days * 12;
+                const coverage = expectedHours > 0 ? (period.analytics.heart_rate.hours_with_good_data / expectedHours * 100) : 0;
+                return { pct: coverage, sufficient: coverage >= 20 };
+            }
+            
+            const preQuality = calcDataCoverage(pre);
+            const postQuality = calcDataCoverage(post);
+            
+            // Show data quality warning if needed
+            const warningEl = document.getElementById('treatmentDataWarning');
+            const warningTextEl = document.getElementById('treatmentDataWarningText');
+            if (!preQuality.sufficient || !postQuality.sufficient) {
+                let warnings = [];
+                if (!preQuality.sufficient) {
+                    warnings.push(`Pre-period: ${formatNumber(preQuality.pct)}% coverage`);
+                }
+                if (!postQuality.sufficient) {
+                    warnings.push(`Post-period: ${formatNumber(postQuality.pct)}% coverage`);
+                }
+                warningTextEl.textContent = `Limited data coverage may affect reliability. ${warnings.join(', ')}.`;
+                warningEl.classList.remove('hidden');
+            } else {
+                warningEl.classList.add('hidden');
+            }
+            
+            // Build comparison table
+            const tbody = document.getElementById('comparisonTable');
+            const rows = [
+                {
+                    metric: 'Sleep Duration',
+                    pre: formatDuration(pre.analytics.sleep.median_sleep_duration),
+                    post: formatDuration(post.analytics.sleep.median_sleep_duration),
+                    diff: comparison.sleep_duration_diff,
+                    format: (v) => (v > 0 ? '+' : '') + formatDuration(Math.abs(v)),
+                    positive: comparison.sleep_duration_diff > 0
+                },
+                {
+                    metric: 'Sleep HR (median)',
+                    pre: formatNumber(pre.analytics.sleep.median_avg_hr) + ' bpm',
+                    post: formatNumber(post.analytics.sleep.median_avg_hr) + ' bpm',
+                    diff: comparison.median_hr_diff,
+                    format: (v) => (v > 0 ? '+' : '') + formatNumber(v) + ' bpm',
+                    positive: comparison.median_hr_diff < 0 // Lower HR is better
+                },
+                {
+                    metric: 'Sleep HRV (median)',
+                    pre: formatNumber(pre.analytics.sleep.median_avg_hrv) + ' ms',
+                    post: formatNumber(post.analytics.sleep.median_avg_hrv) + ' ms',
+                    diff: comparison.median_hrv_diff,
+                    format: (v) => (v > 0 ? '+' : '') + formatNumber(v) + ' ms',
+                    positive: comparison.median_hrv_diff > 0 // Higher HRV is better
+                },
+                {
+                    metric: 'Waking HR (p50)',
+                    pre: formatNumber(pre.analytics.heart_rate.hr_50th_percentile) + ' bpm',
+                    post: formatNumber(post.analytics.heart_rate.hr_50th_percentile) + ' bpm',
+                    diff: comparison.hr_50th_percentile_diff,
+                    format: (v) => (v > 0 ? '+' : '') + formatNumber(v) + ' bpm',
+                    positive: comparison.hr_50th_percentile_diff < 0 // Lower HR is better
+                },
+            ];
+            
+            tbody.innerHTML = rows.map(row => {
+                const diffClass = row.diff === 0 ? 'text-gray-500' : 
+                                  row.positive ? 'text-green-600 font-medium' : 'text-red-600 font-medium';
+                const symbol = row.diff === 0 ? '' : (row.positive ? ' ✓' : ' ✗');
+                return `
+                    <tr class="border-b">
+                        <td class="py-2 px-3 text-gray-700">${row.metric}</td>
+                        <td class="py-2 px-3 text-center text-gray-600">${row.pre}</td>
+                        <td class="py-2 px-3 text-center text-gray-600">${row.post}</td>
+                        <td class="py-2 px-3 text-center ${diffClass}">${row.format(row.diff)}${symbol}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            // Update significance summary
+            const summaryEl = document.getElementById('significanceSummary');
+            const textEl = document.getElementById('significanceText');
+            if (comparison.significant_change) {
+                summaryEl.className = comparison.suggested_effect === 'improved' 
+                    ? 'mb-6 p-4 rounded border border-green-300 bg-green-50'
+                    : 'mb-6 p-4 rounded border border-red-300 bg-red-50';
+                textEl.className = comparison.suggested_effect === 'improved'
+                    ? 'font-medium text-green-800'
+                    : 'font-medium text-red-800';
+                textEl.textContent = comparison.significance_details;
+            } else {
+                summaryEl.className = 'mb-6 p-4 rounded border border-gray-300 bg-gray-50';
+                textEl.className = 'font-medium text-gray-700';
+                textEl.textContent = comparison.significance_details;
+            }
+            
+            // Calculate suggested values
+            const maxDiff = Math.max(
+                Math.abs(comparison.sleep_duration_diff / 3600), // hours
+                Math.abs(comparison.median_hr_diff) / 5,
+                Math.abs(comparison.median_hrv_diff) / 10,
+                Math.abs(comparison.hr_50th_percentile_diff) / 5
+            );
+            suggestedEffectiveness = Math.min(6, Math.max(1, Math.round(maxDiff * 2 + 1)));
+            
+            // Map suggested effect to treatment type
+            if (comparison.suggested_effect === 'improved') {
+                suggestedTreatmentType = 'successful';
+            } else if (comparison.suggested_effect === 'worsened') {
+                suggestedTreatmentType = 'harmful';
+            } else {
+                suggestedTreatmentType = 'no_effect';
+            }
+            
+            // Update the apply button text
+            updateApplyButtonText();
+            
+            // If user hasn't touched treatment type, auto-apply suggested values
+            // Otherwise, show the "Apply Suggested" button
+            if (!userHasModifiedTreatmentType) {
+                selectTreatmentType(suggestedTreatmentType, false);
+                document.getElementById('effectivenessSlider').value = suggestedEffectiveness;
+                updateEffectivenessLabel();
+                document.getElementById('applySuggestedBtn').classList.add('hidden');
+            } else {
+                // Show apply button if suggestion differs from current selection
+                if (suggestedTreatmentType !== selectedTreatmentType || suggestedEffectiveness !== parseInt(document.getElementById('effectivenessSlider').value)) {
+                    document.getElementById('applySuggestedBtn').classList.remove('hidden');
+                } else {
+                    document.getElementById('applySuggestedBtn').classList.add('hidden');
+                }
+            }
+            
+            // Generate additional info summary
+            const summaryLines = [
+                'Metric                | Before     | After      | Change',
+                '----------------------|------------|------------|------------',
+                ...rows.map(row => {
+                    const metric = row.metric.padEnd(22);
+                    const pre = row.pre.padEnd(12);
+                    const post = row.post.padEnd(12);
+                    const diff = row.format(row.diff);
+                    return `${metric}| ${pre}| ${post}| ${diff}`;
+                })
+            ];
+            document.getElementById('additionalInfo').value = summaryLines.join('\n');
+            
+            // Show comparison section
+            document.getElementById('comparisonSection').classList.remove('hidden');
+            
+            // Reset feedback section
+            document.getElementById('analysisMatches').checked = true;
+            document.getElementById('mismatchNote').classList.add('hidden');
+            document.getElementById('submitSuccess').classList.add('hidden');
+        }
+
+        function selectTreatmentType(type, isUserAction = false) {
+            // Track if this is a user modification
+            if (isUserAction) {
+                userHasModifiedTreatmentType = true;
+                // Hide apply button when user makes a selection that matches suggestion
+                if (type === suggestedTreatmentType) {
+                    document.getElementById('applySuggestedBtn').classList.add('hidden');
+                } else if (treatmentComparisonData) {
+                    // Show button if there's data and user picked something different
+                    document.getElementById('applySuggestedBtn').classList.remove('hidden');
+                }
+            }
+            
+            selectedTreatmentType = type;
+            
+            const btnSuccessful = document.getElementById('btnSuccessful');
+            const btnHarmful = document.getElementById('btnHarmful');
+            const btnNoEffect = document.getElementById('btnNoEffect');
+            
+            // Reset all buttons
+            [btnSuccessful, btnHarmful, btnNoEffect].forEach(btn => {
+                btn.className = 'flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-gray-300 bg-white hover:bg-gray-50';
+            });
+            
+            // Highlight selected
+            if (type === 'successful' || type === 'improved') {
+                btnSuccessful.className = 'flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-green-500 bg-green-50';
+                selectedTreatmentType = 'successful';
+            } else if (type === 'harmful' || type === 'worsened') {
+                btnHarmful.className = 'flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-red-500 bg-red-50';
+                selectedTreatmentType = 'harmful';
+            } else {
+                btnNoEffect.className = 'flex-1 py-3 px-4 border-2 rounded-lg text-center transition-colors border-blue-500 bg-blue-50';
+                selectedTreatmentType = 'no_effect';
+            }
+        }
+
+        function updateEffectivenessLabel() {
+            const slider = document.getElementById('effectivenessSlider');
+            const value = parseInt(slider.value);
+            document.getElementById('effectivenessValue').textContent = value;
+            
+            const labels = [
+                '0-10% improvement',
+                '10-25% improvement',
+                '25-50% improvement',
+                '50-75% improvement',
+                '75-90% improvement',
+                '90-100% improvement'
+            ];
+            document.getElementById('effectivenessLabel').textContent = labels[value - 1];
+        }
+
+        function updateApplyButtonText() {
+            const typeLabels = {
+                'successful': 'Successful',
+                'harmful': 'Harmful',
+                'no_effect': 'No Effect'
+            };
+            const effectivenessLabels = ['0-10%', '10-25%', '25-50%', '50-75%', '75-90%', '90-100%'];
+            const typeLabel = typeLabels[suggestedTreatmentType] || 'No Effect';
+            const effectLabel = effectivenessLabels[suggestedEffectiveness - 1] || '0-10%';
+            document.getElementById('applySuggestedBtn').textContent = `Apply: ${typeLabel} (${effectLabel})`;
+        }
+
+        function applySuggestedAnalysis() {
+            selectTreatmentType(suggestedTreatmentType, false);
+            document.getElementById('effectivenessSlider').value = suggestedEffectiveness;
+            updateEffectivenessLabel();
+            document.getElementById('applySuggestedBtn').classList.add('hidden');
+        }
+
+        function toggleMismatchNote() {
+            const checkbox = document.getElementById('analysisMatches');
+            const note = document.getElementById('mismatchNote');
+            if (checkbox.checked) {
+                note.classList.add('hidden');
+            } else {
+                note.classList.remove('hidden');
+            }
+        }
+
+        function submitTreatment() {
+            // For PoC, just show success message
+            document.getElementById('submitSuccess').classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('submitSuccess').classList.add('hidden');
+            }, 3000);
+        }
+
+        // Initialize treatment month picker
+        initTreatmentMonthPicker();
 
         // Check auth status and load data on page load
         checkAuthStatus();
