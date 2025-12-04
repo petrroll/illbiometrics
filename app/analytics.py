@@ -2,11 +2,16 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import pandas as pd
 import numpy as np
 
 from app.oura_client import SleepData, HeartRateData
+
+# Type imports for Garmin (optional dependency)
+if TYPE_CHECKING:
+    from app.garmin_client import SleepData as GarminSleepData
+    from app.garmin_client import HeartRateData as GarminHeartRateData
 
 # Default maximum gap (in seconds) between consecutive HR points to consider them connected
 # Points further apart than this are not interpolated between
@@ -694,4 +699,239 @@ def compare_periods(
         significant_change=significant_change,
         significance_details=significance_details,
     )
+
+
+# ============================================================================
+# Garmin-specific analytics
+# ============================================================================
+
+@dataclass
+class StressAnalytics:
+    """Stress analytics results (Garmin-specific)."""
+    start_date: Optional[date]
+    end_date: Optional[date]
+    days_count: int
+    average_stress_level: float
+    stress_level_std: float
+    stress_20th_percentile: float
+    stress_50th_percentile: float
+    stress_80th_percentile: float
+    # Stress duration analytics (in seconds)
+    median_rest_stress_duration: float
+    median_low_stress_duration: float
+    median_medium_stress_duration: float
+    median_high_stress_duration: float
+
+    @classmethod
+    def empty(cls) -> "StressAnalytics":
+        """Create an empty StressAnalytics instance with default values."""
+        return cls(
+            start_date=None,
+            end_date=None,
+            days_count=0,
+            average_stress_level=0.0,
+            stress_level_std=0.0,
+            stress_20th_percentile=0.0,
+            stress_50th_percentile=0.0,
+            stress_80th_percentile=0.0,
+            median_rest_stress_duration=0.0,
+            median_low_stress_duration=0.0,
+            median_medium_stress_duration=0.0,
+            median_high_stress_duration=0.0,
+        )
+
+
+@dataclass
+class DailyStressAnalytics:
+    """Stress analytics for a single day."""
+    day: date
+    overall_stress_level: int
+    rest_stress_duration: Optional[int]
+    low_stress_duration: Optional[int]
+    medium_stress_duration: Optional[int]
+    high_stress_duration: Optional[int]
+
+
+def garmin_stress_to_dataframe(stress_data: list) -> pd.DataFrame:
+    """Convert Garmin stress data to DataFrame.
+    
+    Args:
+        stress_data: List of DailyStressData objects from garmin_client
+        
+    Returns:
+        DataFrame with stress data
+    """
+    records = []
+    for stress in stress_data:
+        record = {
+            "calendar_date": stress.calendar_date,
+            "overall_stress_level": stress.overall_stress_level,
+            "rest_stress_duration": stress.rest_stress_duration,
+            "low_stress_duration": stress.low_stress_duration,
+            "medium_stress_duration": stress.medium_stress_duration,
+            "high_stress_duration": stress.high_stress_duration,
+        }
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def analyze_stress(df: pd.DataFrame) -> StressAnalytics:
+    """Compute stress analytics from DataFrame.
+    
+    Args:
+        df: DataFrame with stress data (from garmin_stress_to_dataframe)
+        
+    Returns:
+        StressAnalytics with computed statistics
+    """
+    if df.empty:
+        return StressAnalytics.empty()
+    
+    # Get actual date range from the data
+    if "calendar_date" in df.columns:
+        dates = pd.to_datetime(df["calendar_date"]).dt.date
+        actual_start = dates.min()
+        actual_end = dates.max()
+    else:
+        actual_start = None
+        actual_end = None
+    
+    # Stress level statistics
+    stress_levels = df["overall_stress_level"].dropna()
+    if len(stress_levels) == 0:
+        return StressAnalytics.empty()
+    
+    average_stress = float(stress_levels.mean())
+    stress_std = float(stress_levels.std()) if len(stress_levels) > 1 else 0.0
+    
+    # Stress percentiles
+    stress_20th = float(np.percentile(stress_levels, 20))
+    stress_50th = float(np.percentile(stress_levels, 50))
+    stress_80th = float(np.percentile(stress_levels, 80))
+    
+    # Stress duration medians
+    def safe_median(series: pd.Series) -> float:
+        valid = series.dropna()
+        if len(valid) == 0:
+            return 0.0
+        return float(valid.median())
+    
+    median_rest = safe_median(df["rest_stress_duration"])
+    median_low = safe_median(df["low_stress_duration"])
+    median_medium = safe_median(df["medium_stress_duration"])
+    median_high = safe_median(df["high_stress_duration"])
+    
+    return StressAnalytics(
+        start_date=actual_start,
+        end_date=actual_end,
+        days_count=len(df),
+        average_stress_level=round(average_stress, 1),
+        stress_level_std=round(stress_std, 1) if not np.isnan(stress_std) else 0.0,
+        stress_20th_percentile=round(stress_20th, 1),
+        stress_50th_percentile=round(stress_50th, 1),
+        stress_80th_percentile=round(stress_80th, 1),
+        median_rest_stress_duration=round(median_rest, 1),
+        median_low_stress_duration=round(median_low, 1),
+        median_medium_stress_duration=round(median_medium, 1),
+        median_high_stress_duration=round(median_high, 1),
+    )
+
+
+def analyze_stress_daily(df: pd.DataFrame) -> list[DailyStressAnalytics]:
+    """Compute daily stress analytics from DataFrame.
+    
+    Args:
+        df: DataFrame with stress data (from garmin_stress_to_dataframe)
+        
+    Returns:
+        List of DailyStressAnalytics sorted by day
+    """
+    if df.empty:
+        return []
+    
+    results: list[DailyStressAnalytics] = []
+    for _, row in df.iterrows():
+        calendar_date = row.get("calendar_date")
+        if isinstance(calendar_date, str):
+            day = date.fromisoformat(calendar_date)
+        elif isinstance(calendar_date, date):
+            day = calendar_date
+        else:
+            continue
+        
+        results.append(DailyStressAnalytics(
+            day=day,
+            overall_stress_level=int(row.get("overall_stress_level", 0)),
+            rest_stress_duration=row.get("rest_stress_duration"),
+            low_stress_duration=row.get("low_stress_duration"),
+            medium_stress_duration=row.get("medium_stress_duration"),
+            high_stress_duration=row.get("high_stress_duration"),
+        ))
+    
+    # Sort by day
+    results.sort(key=lambda x: x.day)
+    return results
+
+
+def garmin_sleep_to_dataframe(sleep_data: list) -> pd.DataFrame:
+    """Convert Garmin sleep data to DataFrame.
+    
+    Garmin sleep data uses a compatible structure with Oura, so this function
+    mirrors oura_sleep_to_dataframe but accepts Garmin SleepData objects.
+    
+    Args:
+        sleep_data: List of SleepData objects from garmin_client
+        
+    Returns:
+        DataFrame with sleep data compatible with analyze_sleep
+    """
+    records = []
+    for sleep in sleep_data:
+        record = {
+            "id": sleep.id,
+            "day": sleep.day,
+            "type": sleep.type,
+            "bedtime_start": sleep.bedtime_start,
+            "bedtime_end": sleep.bedtime_end,
+            "total_sleep_duration": sleep.total_sleep_duration,
+            "average_heart_rate": sleep.average_heart_rate,
+            "average_hrv": sleep.average_hrv,
+            "heart_rate_samples": sleep.heart_rate.items if sleep.heart_rate else [],
+            "hrv_samples": sleep.hrv.items if sleep.hrv else [],
+            # Garmin-specific fields
+            "deep_sleep_seconds": getattr(sleep, "deep_sleep_seconds", None),
+            "light_sleep_seconds": getattr(sleep, "light_sleep_seconds", None),
+            "rem_sleep_seconds": getattr(sleep, "rem_sleep_seconds", None),
+            "awake_sleep_seconds": getattr(sleep, "awake_sleep_seconds", None),
+            "sleep_score": getattr(sleep, "sleep_score", None),
+            "avg_sleep_stress": getattr(sleep, "avg_sleep_stress", None),
+        }
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def garmin_heartrate_to_dataframe(heartrate_data) -> pd.DataFrame:
+    """Convert Garmin heart rate data to DataFrame.
+    
+    Garmin heart rate data uses a compatible structure with Oura, so this function
+    mirrors oura_heartrate_to_dataframe but accepts Garmin HeartRateData objects.
+    
+    Args:
+        heartrate_data: HeartRateData object from garmin_client
+        
+    Returns:
+        DataFrame with heart rate data compatible with analyze_heart_rate
+    """
+    records = []
+    for sample in heartrate_data.data:
+        records.append({
+            "bpm": sample.bpm,
+            "source": sample.source,
+            "timestamp": sample.timestamp,
+        })
+    df = pd.DataFrame(records)
+    if not df.empty:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["day"] = df["timestamp"].dt.date
+    return df
 

@@ -1,0 +1,101 @@
+{
+  "_metadata": {
+    "source": "garmin",
+    "endpoint": "sleep",
+    "start_date": "2025-11-01",
+    "end_date": "2025-11-28",
+    "fetched_at": "2025-12-01T00:00:00Z"
+  },
+  "data": [
+    {
+      "daily_sleep_dto": {
+        "id": "1730505600000",
+        "calendar_date": "2025-11-01",
+        "sleep_time_seconds": 27000,
+        "sleep_start_timestamp_gmt": 1730505600000,
+        "sleep_end_timestamp_gmt": 1730532600000,
+        "deep_sleep_seconds": 5400,
+        "light_sleep_seconds": 15600,
+        "rem_sleep_seconds": 5400,
+        "awake_sleep_seconds": 600,
+        "average_sp_o2_hr_sleep": 52.5,
+        "avg_sleep_stress": 18.5,
+        "sleep_scores": {
+          "overall": { "value": 78 }
+        }
+      }
+    },
+    {
+      "daily_sleep_dto": {
+        "id": "1730592000000",
+        "calendar_date": "2025-11-02",
+        "sleep_time_seconds": 28800,
+        "sleep_start_timestamp_gmt": 1730592000000,
+        "sleep_end_timestamp_gmt": 1730620800000,
+        "deep_sleep_seconds": 6000,
+        "light_sleep_seconds": 16200,
+        "rem_sleep_seconds": 6000,
+        "awake_sleep_seconds": 600,
+        "average_sp_o2_hr_sleep": 51.0,
+        "avg_sleep_stress": 15.2,
+        "sleep_scores": {
+          "overall": { "value": 82 }
+        }
+      }
+    },
+    {
+      "daily_sleep_dto": {
+        "id": "1730678400000",
+        "calendar_date": "2025-11-03",
+        "sleep_time_seconds": 25200,
+        "sleep_start_timestamp_gmt": 1730678400000,
+        "sleep_end_timestamp_gmt": 1730703600000,
+        "deep_sleep_seconds": 4800,
+        "light_sleep_seconds": 14400,
+        "rem_sleep_seconds": 5400,
+        "awake_sleep_seconds": 600,
+        "average_sp_o2_hr_sleep": 54.0,
+        "avg_sleep_stress": 22.0,
+        "sleep_scores": {
+          "overall": { "value": 72 }
+        }
+      }
+    },
+    {
+      "daily_sleep_dto": {
+        "id": "1730764800000",
+        "calendar_date": "2025-11-04",
+        "sleep_time_seconds": 30600,
+        "sleep_start_timestamp_gmt": 1730764800000,
+        "sleep_end_timestamp_gmt": 1730795400000,
+        "deep_sleep_seconds": 7200,
+        "light_sleep_seconds": 16800,
+        "rem_sleep_seconds": 6000,
+        "awake_sleep_seconds": 600,
+        "average_sp_o2_hr_sleep": 50.0,
+        "avg_sleep_stress": 12.5,
+        "sleep_scores": {
+          "overall": { "value": 88 }
+        }
+      }
+    },
+    {
+      "daily_sleep_dto": {
+        "id": "1730851200000",
+        "calendar_date": "2025-11-05",
+        "sleep_time_seconds": 27600,
+        "sleep_start_timestamp_gmt": 1730851200000,
+        "sleep_end_timestamp_gmt": 1730878800000,
+        "deep_sleep_seconds": 5700,
+        "light_sleep_seconds": 15600,
+        "rem_sleep_seconds": 5700,
+        "awake_sleep_seconds": 600,
+        "average_sp_o2_hr_sleep": 53.0,
+        "avg_sleep_stress": 16.8,
+        "sleep_scores": {
+          "overall": { "value": 80 }
+        }
+      }
+    }
+  ]
+}

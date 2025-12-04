@@ -16,6 +16,10 @@ OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token"
 OURA_API_BASE = "https://api.ouraring.com/v2"
 OURA_SANDBOX_BASE = "https://api.ouraring.com/v2/sandbox"
 
+# Garmin Configuration
+# Path to the garth tokens directory (created by 'uvx garth login')
+GARMIN_TOKEN_DIR = os.getenv("GARMIN_TOKEN_DIR", os.path.expanduser("~/.garth"))
+
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
 SANDBOX_CACHE_DIR = PROJECT_ROOT / "tests" / "fixtures"
