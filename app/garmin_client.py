@@ -6,6 +6,11 @@ from typing import Callable, Optional
 import json
 import logging
 
+import garth
+from garth import SleepData as GarthSleepData
+from garth import DailyStress as GarthDailyStress
+from garth import DailyHRV as GarthDailyHRV
+
 from app.config import GARMIN_TOKEN_DIR, SANDBOX_CACHE_DIR
 
 logger = logging.getLogger(__name__)
@@ -110,8 +115,6 @@ def _load_from_sandbox_cache(endpoint: str, start_date: date, end_date: date) ->
 
 def _save_to_sandbox_cache(endpoint: str, data: dict, start_date: date, end_date: date) -> None:
     """Save data to sandbox cache file with metadata."""
-    from datetime import timezone
-    
     cache_path = _get_sandbox_cache_path(endpoint, start_date, end_date)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -248,8 +251,6 @@ class GarminClient:
     def _init_garth_client(self) -> None:
         """Initialize the garth client with stored credentials."""
         try:
-            import garth
-            
             # Try to resume from saved session
             garth.resume(self._token_dir)
             
@@ -313,9 +314,6 @@ class GarminClient:
         
         # User mode - fetch from Garmin via garth
         self._ensure_authenticated()
-        
-        import garth
-        from garth import SleepData as GarthSleepData
         
         # Fetch sleep data for the date range
         data_list = []
@@ -411,14 +409,11 @@ class GarminClient:
         # User mode - fetch from Garmin via garth
         self._ensure_authenticated()
         
-        import garth
-        from garth import DailyStress
-        
         # Calculate number of days
         days = (end_date - start_date).days + 1
         
         try:
-            stress_list = DailyStress.list(str(end_date), days)
+            stress_list = GarthDailyStress.list(str(end_date), days)
             data_list = []
             for stress in stress_list:
                 data_list.append({
@@ -497,14 +492,11 @@ class GarminClient:
         # User mode - fetch from Garmin via garth
         self._ensure_authenticated()
         
-        import garth
-        from garth import DailyHRV
-        
         # Calculate number of days
         days = (end_date - start_date).days + 1
         
         try:
-            hrv_list = DailyHRV.list(period=days)
+            hrv_list = GarthDailyHRV.list(period=days)
             data_list = []
             for hrv in hrv_list:
                 # Filter to date range
