@@ -1,0 +1,67 @@
+{
+  "_metadata": {
+    "source": "garmin",
+    "endpoint": "stress",
+    "start_date": "2025-11-01",
+    "end_date": "2025-11-28",
+    "fetched_at": "2025-12-01T00:00:00Z"
+  },
+  "data": [
+    {
+      "calendar_date": "2025-11-01",
+      "overall_stress_level": 32,
+      "rest_stress_duration": 28800,
+      "low_stress_duration": 14400,
+      "medium_stress_duration": 7200,
+      "high_stress_duration": 1800
+    },
+    {
+      "calendar_date": "2025-11-02",
+      "overall_stress_level": 28,
+      "rest_stress_duration": 30000,
+      "low_stress_duration": 15600,
+      "medium_stress_duration": 6000,
+      "high_stress_duration": 1200
+    },
+    {
+      "calendar_date": "2025-11-03",
+      "overall_stress_level": 45,
+      "rest_stress_duration": 21600,
+      "low_stress_duration": 10800,
+      "medium_stress_duration": 12600,
+      "high_stress_duration": 5400
+    },
+    {
+      "calendar_date": "2025-11-04",
+      "overall_stress_level": 35,
+      "rest_stress_duration": 27000,
+      "low_stress_duration": 13200,
+      "medium_stress_duration": 9000,
+      "high_stress_duration": 3600
+    },
+    {
+      "calendar_date": "2025-11-05",
+      "overall_stress_level": 25,
+      "rest_stress_duration": 32400,
+      "low_stress_duration": 18000,
+      "medium_stress_duration": 4800,
+      "high_stress_duration": 600
+    },
+    {
+      "calendar_date": "2025-11-06",
+      "overall_stress_level": 38,
+      "rest_stress_duration": 25200,
+      "low_stress_duration": 12000,
+      "medium_stress_duration": 10200,
+      "high_stress_duration": 4200
+    },
+    {
+      "calendar_date": "2025-11-07",
+      "overall_stress_level": 30,
+      "rest_stress_duration": 29400,
+      "low_stress_duration": 14400,
+      "medium_stress_duration": 7800,
+      "high_stress_duration": 2400
+    }
+  ]
+}
