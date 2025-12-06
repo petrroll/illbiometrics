@@ -23,6 +23,8 @@ from app.analytics import (
     analyze_combined_daily,
     CombinedAnalytics,
     CombinedDailyAnalytics,
+    get_monthly_avg_sleep_times,
+    generate_fallback_sleep_intervals,
 )
 from app.oura_client import SleepData, SleepHRData, SleepHRVData, _parse_sleep_data, HeartRateData, HeartRateSample
 
@@ -1127,3 +1129,321 @@ class TestCombinedAnalytics:
         assert len(result.days) == 2
         assert result.days[0].average_hr == 70.0
         assert result.days[1].average_hr == 75.0
+
+
+class TestGetMonthlyAvgSleepTimes:
+    """Tests for get_monthly_avg_sleep_times function."""
+
+    def test_calculates_monthly_averages(self):
+        """Test that monthly average sleep times are calculated correctly."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T08:00:00+00:00",
+                total_sleep_duration=36000,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+            SleepData(
+                id="test-2",
+                day="2025-01-02",
+                type="long_sleep",
+                bedtime_start="2025-01-02T23:00:00+00:00",
+                bedtime_end="2025-01-03T09:00:00+00:00",
+                total_sleep_duration=36000,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        result = get_monthly_avg_sleep_times(df)
+        
+        assert "2025-01" in result
+        avg_start, avg_end = result["2025-01"]
+        # Average of 22:00 and 23:00 = 22:30 (22.5 hours)
+        assert abs(avg_start - 22.5) < 0.1
+        # Average of 08:00 and 09:00 = 08:30 (8.5 hours)
+        assert abs(avg_end - 8.5) < 0.1
+
+    def test_handles_after_midnight_start(self):
+        """Test that bedtime after midnight is handled correctly."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2025-01-01T01:00:00+00:00",  # After midnight
+                bedtime_end="2025-01-01T09:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        result = get_monthly_avg_sleep_times(df)
+        
+        assert "2025-01" in result
+        avg_start, avg_end = result["2025-01"]
+        # 01:00 after midnight should be treated as 25.0 (24 + 1)
+        assert avg_start >= 24
+
+    def test_ignores_non_long_sleep(self):
+        """Test that non-long_sleep types are ignored."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="rest",
+                bedtime_start="2025-01-01T14:00:00+00:00",
+                bedtime_end="2025-01-01T14:30:00+00:00",
+                total_sleep_duration=1800,
+                average_heart_rate=55.0,
+                average_hrv=60,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        result = get_monthly_avg_sleep_times(df)
+        
+        assert result == {}
+
+    def test_handles_empty_dataframe(self):
+        """Test that empty DataFrame returns empty dict."""
+        df = pd.DataFrame()
+        
+        result = get_monthly_avg_sleep_times(df)
+        
+        assert result == {}
+
+
+class TestGenerateFallbackSleepIntervals:
+    """Tests for generate_fallback_sleep_intervals function."""
+
+    def test_generates_intervals_for_missing_dates(self):
+        """Test that fallback intervals are generated for dates without sleep records."""
+        # Create sleep data for Jan 1 and Jan 3 (missing Jan 2)
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2024-12-31T22:00:00+00:00",
+                bedtime_end="2025-01-01T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+            SleepData(
+                id="test-2",
+                day="2025-01-03",
+                type="long_sleep",
+                bedtime_start="2025-01-02T22:00:00+00:00",
+                bedtime_end="2025-01-03T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        existing_intervals = get_sleep_intervals(sleep_df)
+        
+        # Generate fallback for Jan 1-3 range
+        fallback = generate_fallback_sleep_intervals(
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 3),
+            sleep_df=sleep_df,
+            existing_intervals=existing_intervals,
+        )
+        
+        # Should generate 1 fallback interval for Jan 2
+        assert len(fallback) == 1
+        start, end = fallback[0]
+        assert end.date() == date(2025, 1, 2)
+
+    def test_no_fallback_when_all_dates_covered(self):
+        """Test that no fallback is generated when all dates have sleep records."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2024-12-31T22:00:00+00:00",
+                bedtime_end="2025-01-01T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+            SleepData(
+                id="test-2",
+                day="2025-01-02",
+                type="long_sleep",
+                bedtime_start="2025-01-01T22:00:00+00:00",
+                bedtime_end="2025-01-02T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        existing_intervals = get_sleep_intervals(sleep_df)
+        
+        fallback = generate_fallback_sleep_intervals(
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 2),
+            sleep_df=sleep_df,
+            existing_intervals=existing_intervals,
+        )
+        
+        assert len(fallback) == 0
+
+    def test_returns_empty_when_no_sleep_data_for_averages(self):
+        """Test that empty list is returned when no sleep data exists to calculate averages."""
+        sleep_df = pd.DataFrame()
+        
+        fallback = generate_fallback_sleep_intervals(
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 3),
+            sleep_df=sleep_df,
+            existing_intervals=[],
+        )
+        
+        assert fallback == []
+
+
+class TestGetSleepIntervalsWithFallback:
+    """Tests for get_sleep_intervals with fallback date range."""
+
+    def test_includes_fallback_intervals_when_date_range_provided(self):
+        """Test that fallback intervals are included when date range is provided."""
+        # Sleep data for Jan 1 and Jan 3 only
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2024-12-31T22:00:00+00:00",
+                bedtime_end="2025-01-01T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+            SleepData(
+                id="test-2",
+                day="2025-01-03",
+                type="long_sleep",
+                bedtime_start="2025-01-02T22:00:00+00:00",
+                bedtime_end="2025-01-03T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        # Without date range - should have 2 intervals
+        intervals_no_fallback = get_sleep_intervals(df)
+        assert len(intervals_no_fallback) == 2
+        
+        # With date range - should have 3 intervals (2 real + 1 fallback for Jan 2)
+        intervals_with_fallback = get_sleep_intervals(
+            df,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 3),
+        )
+        assert len(intervals_with_fallback) == 3
+
+    def test_no_fallback_when_only_start_date_provided(self):
+        """Test that fallback is not generated when only start_date is provided."""
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2024-12-31T22:00:00+00:00",
+                bedtime_end="2025-01-01T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        df = oura_sleep_to_dataframe(sleep_data)
+        
+        intervals = get_sleep_intervals(df, start_date=date(2025, 1, 1))
+        
+        # Should only have the 1 real interval, no fallback
+        assert len(intervals) == 1
+
+
+class TestAnalyzeCombinedWithFallback:
+    """Tests for analyze_combined with fallback filtering."""
+
+    def test_filters_hr_with_fallback_when_date_range_provided(self):
+        """Test that HR is filtered using fallback intervals when date range provided."""
+        # Sleep data only for Jan 1 (missing Jan 2)
+        sleep_data = [
+            SleepData(
+                id="test-1",
+                day="2025-01-01",
+                type="long_sleep",
+                bedtime_start="2024-12-31T22:00:00+00:00",
+                bedtime_end="2025-01-01T06:00:00+00:00",
+                total_sleep_duration=28800,
+                average_heart_rate=60.0,
+                average_hrv=50,
+                heart_rate=None,
+                hrv=None,
+            ),
+        ]
+        sleep_df = oura_sleep_to_dataframe(sleep_data)
+        
+        # HR samples including one during typical sleep on Jan 2 (missing sleep record)
+        hr_samples = [
+            HeartRateSample(bpm=70, source="awake", timestamp="2025-01-01T10:00:00+00:00"),
+            HeartRateSample(bpm=50, source="rest", timestamp="2025-01-02T02:00:00+00:00"),  # Sleep hours on Jan 2
+            HeartRateSample(bpm=75, source="awake", timestamp="2025-01-02T10:00:00+00:00"),
+        ]
+        heartrate_data = HeartRateData(data=hr_samples)
+        hr_df = oura_heartrate_to_dataframe(heartrate_data)
+        
+        # Without date range - sleep sample on Jan 2 should NOT be filtered
+        result_no_fallback = analyze_combined(sleep_df, hr_df)
+        
+        # With date range - sleep sample on Jan 2 SHOULD be filtered by fallback
+        result_with_fallback = analyze_combined(
+            sleep_df, hr_df,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 2),
+        )
+        
+        # With fallback, the 02:00 sample should be filtered, so average should be different
+        # Without fallback: (70 + 50 + 75) / 3 = 65 
+        # With fallback: (70 + 75) / 2 = 72.5 (50 bpm sample filtered)
+        assert result_no_fallback.heart_rate.average_hr != result_with_fallback.heart_rate.average_hr
+        assert result_with_fallback.heart_rate.average_hr == 72.5

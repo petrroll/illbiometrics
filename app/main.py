@@ -131,13 +131,13 @@ async def combined_analytics(
     
     try:
         # Fetch both sleep and heart rate data
-        sleep_data, _, _ = await oura_client.get_sleep_data(start_date, end_date)
+        sleep_data, actual_start, actual_end = await oura_client.get_sleep_data(start_date, end_date)
         heartrate_data, _, _ = await oura_client.get_heartrate_data(start_date, end_date)
         
         sleep_df = oura_sleep_to_dataframe(sleep_data)
         hr_df = oura_heartrate_to_dataframe(heartrate_data)
         
-        analytics = analyze_combined(sleep_df, hr_df)
+        analytics = analyze_combined(sleep_df, hr_df, actual_start, actual_end)
         
         return {
             "data_source": oura_client.data_source.value,
@@ -321,7 +321,7 @@ async def combined_daily_analytics(
         sleep_df = oura_sleep_to_dataframe(sleep_data)
         hr_df = oura_heartrate_to_dataframe(heartrate_data)
         
-        analytics = analyze_combined_daily(sleep_df, hr_df)
+        analytics = analyze_combined_daily(sleep_df, hr_df, actual_start, actual_end)
         
         return {
             "data_source": oura_client.data_source.value,

@@ -128,13 +128,25 @@ def oura_sleep_to_dataframe(sleep_data: list[SleepData]) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def get_sleep_intervals(sleep_df: pd.DataFrame) -> list[tuple[datetime, datetime]]:
+def get_sleep_intervals(
+    sleep_df: pd.DataFrame,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[tuple[datetime, datetime]]:
     """Extract sleep time intervals from sleep DataFrame.
     
     Only considers 'long_sleep' type entries (actual overnight sleep).
     
+    If start_date and end_date are provided, also generates fallback intervals
+    for dates in the range that don't have corresponding sleep records, using the
+    monthly average bedtime start/end times.
+    
     Args:
         sleep_df: DataFrame with 'type', 'bedtime_start', 'bedtime_end' columns.
+        start_date: Optional start of date range. If provided along with end_date,
+            fallback intervals will be generated for dates without sleep data.
+        end_date: Optional end of date range. If provided along with start_date,
+            fallback intervals will be generated for dates without sleep data.
     
     Returns:
         List of (start, end) datetime tuples representing sleep periods.
@@ -143,11 +155,12 @@ def get_sleep_intervals(sleep_df: pd.DataFrame) -> list[tuple[datetime, datetime
         return []
     
     # Filter to long_sleep type only
+    filtered_sleep_df = sleep_df
     if "type" in sleep_df.columns:
-        sleep_df = sleep_df[sleep_df["type"] == NIGH_SLEEP_SLEEP_TYPE]
+        filtered_sleep_df = sleep_df[sleep_df["type"] == NIGH_SLEEP_SLEEP_TYPE]
     
     intervals = []
-    for _, row in sleep_df.iterrows():
+    for _, row in filtered_sleep_df.iterrows():
         start = row.get("bedtime_start")
         end = row.get("bedtime_end")
         if start and end:
@@ -158,10 +171,180 @@ def get_sleep_intervals(sleep_df: pd.DataFrame) -> list[tuple[datetime, datetime
             except (ValueError, TypeError):
                 continue
     
+    # Generate fallback intervals for missing dates if date range is provided
+    if start_date is not None and end_date is not None:
+        fallback_intervals = generate_fallback_sleep_intervals(start_date, end_date, sleep_df, intervals)
+        intervals.extend(fallback_intervals)
+    
     return intervals
 
 
-def filter_hr_outside_sleep(hr_df: pd.DataFrame, sleep_intervals: Sequence[tuple[datetime, datetime]]) -> tuple[pd.DataFrame, float]:
+def get_monthly_avg_sleep_times(sleep_df: pd.DataFrame) -> dict[str, tuple[float, float]]:
+    """Calculate average bedtime start/end times per month.
+    
+    Returns a dictionary mapping month keys (YYYY-MM) to tuples of 
+    (avg_start_hour, avg_end_hour) where hours are in 24h format.
+    For bedtime start, hours after midnight are treated as 24+ (e.g., 1am = 25).
+    
+    Args:
+        sleep_df: DataFrame with 'type', 'bedtime_start', 'bedtime_end', 'day' columns.
+    
+    Returns:
+        Dict mapping month string to (avg_start_hour, avg_end_hour).
+    """
+    if sleep_df.empty:
+        return {}
+    
+    # Filter to long_sleep only
+    if "type" in sleep_df.columns:
+        long_sleep = sleep_df[sleep_df["type"] == NIGH_SLEEP_SLEEP_TYPE].copy()
+    else:
+        long_sleep = sleep_df.copy()
+    
+    if long_sleep.empty:
+        return {}
+    
+    # Parse timestamps
+    long_sleep["bedtime_start_dt"] = pd.to_datetime(long_sleep["bedtime_start"], utc=True)
+    long_sleep["bedtime_end_dt"] = pd.to_datetime(long_sleep["bedtime_end"], utc=True)
+    
+    # Extract month from the 'day' column
+    long_sleep["month"] = pd.to_datetime(long_sleep["day"]).dt.to_period("M").astype(str)
+    
+    # Calculate hour of day for start/end
+    # For bedtime start: treat hours 0-12 as 24-36 (after midnight)
+    def start_hour(dt):
+        h = dt.hour + dt.minute / 60
+        if h < 12:  # After midnight, treat as next day
+            h += 24
+        return h
+    
+    def end_hour(dt):
+        return dt.hour + dt.minute / 60
+    
+    long_sleep["start_hour"] = long_sleep["bedtime_start_dt"].apply(start_hour)
+    long_sleep["end_hour"] = long_sleep["bedtime_end_dt"].apply(end_hour)
+    
+    # Group by month and calculate averages
+    monthly_avgs = long_sleep.groupby("month").agg({
+        "start_hour": "mean",
+        "end_hour": "mean"
+    })
+    
+    return {
+        str(month): (float(row["start_hour"]), float(row["end_hour"]))
+        for month, row in monthly_avgs.iterrows()
+    }
+
+
+def generate_fallback_sleep_intervals(
+    start_date: date,
+    end_date: date,
+    sleep_df: pd.DataFrame,
+    existing_intervals: Sequence[tuple[datetime, datetime]]
+) -> list[tuple[datetime, datetime]]:
+    """Generate sleep intervals for dates missing sleep records using monthly averages.
+    
+    For each date in the date range that doesn't have a corresponding sleep interval,
+    creates a synthetic interval using the average bedtime start/end for that month.
+    
+    Args:
+        start_date: Start of the date range to check for missing sleep records.
+        end_date: End of the date range to check for missing sleep records.
+        sleep_df: DataFrame with sleep records (for calculating monthly averages).
+        existing_intervals: List of (start, end) datetime tuples from actual sleep records.
+    
+    Returns:
+        List of synthetic (start, end) datetime tuples for dates without sleep data.
+    """
+    from datetime import timedelta
+    
+    # Get monthly average sleep times
+    monthly_avgs = get_monthly_avg_sleep_times(sleep_df)
+    
+    if not monthly_avgs:
+        return []
+    
+    # Get all dates in the range
+    all_dates: set[date] = set()
+    current = start_date
+    while current <= end_date:
+        all_dates.add(current)
+        current += timedelta(days=1)
+    
+    # Get dates that have sleep intervals (the 'day' when you woke up)
+    covered_dates = set()
+    for start, end in existing_intervals:
+        # The sleep record 'day' is typically the date you wake up
+        covered_dates.add(end.date())
+    
+    # Find missing dates
+    missing_dates = all_dates - covered_dates
+    
+    # Generate fallback intervals for missing dates
+    fallback_intervals = []
+    
+    # Calculate overall average as fallback if a month has no data
+    if monthly_avgs:
+        all_starts = [v[0] for v in monthly_avgs.values()]
+        all_ends = [v[1] for v in monthly_avgs.values()]
+        overall_avg_start = sum(all_starts) / len(all_starts)
+        overall_avg_end = sum(all_ends) / len(all_ends)
+    else:
+        # Default fallback: 23:00 - 09:00
+        overall_avg_start = 23.0
+        overall_avg_end = 9.0
+    
+    for missing_date in missing_dates:
+        # Get the month for this date
+        month_key = f"{missing_date.year}-{missing_date.month:02d}"
+        
+        if month_key in monthly_avgs:
+            avg_start, avg_end = monthly_avgs[month_key]
+        else:
+            avg_start, avg_end = overall_avg_start, overall_avg_end
+        
+        # Convert average hours back to datetime
+        # Start time: if >= 24, it's after midnight, so subtract 24 and use same date
+        # Otherwise, it's the evening before (missing_date - 1 day)
+        start_hour = avg_start % 24
+        start_minute = int((avg_start % 1) * 60)
+        
+        if avg_start >= 24:
+            # Start is after midnight on missing_date
+            start_date = missing_date
+        else:
+            # Start is evening before missing_date
+            start_date = missing_date - timedelta(days=1)
+        
+        end_hour = int(avg_end)
+        end_minute = int((avg_end % 1) * 60)
+        end_date = missing_date
+        
+        # Create timezone-aware datetimes in UTC
+        try:
+            start_dt = pd.Timestamp(
+                year=start_date.year, month=start_date.month, day=start_date.day,
+                hour=int(start_hour), minute=start_minute, tz="UTC"
+            )
+            end_dt = pd.Timestamp(
+                year=end_date.year, month=end_date.month, day=end_date.day,
+                hour=end_hour, minute=end_minute, tz="UTC"
+            )
+            
+            # Only add if end is after start
+            if end_dt > start_dt:
+                fallback_intervals.append((start_dt, end_dt))
+        except (ValueError, TypeError):
+            continue
+    
+    return fallback_intervals
+
+
+def filter_hr_outside_sleep(
+    hr_df: pd.DataFrame, 
+    sleep_intervals: Sequence[tuple[datetime, datetime]],
+) -> tuple[pd.DataFrame, float]:
     """Filter heart rate DataFrame to exclude samples during sleep periods.
     
     Note: This implementation is O(n_samples * n_intervals) which scales poorly with
@@ -173,6 +356,8 @@ def filter_hr_outside_sleep(hr_df: pd.DataFrame, sleep_intervals: Sequence[tuple
     Args:
         hr_df: DataFrame with 'timestamp' column.
         sleep_intervals: List of (start, end) datetime tuples representing sleep periods.
+            Use get_sleep_intervals(sleep_df, start_date, end_date) to include fallback
+            intervals for dates without sleep data.
     
     Returns:
         Tuple of (filtered DataFrame, total sleep hours filtered out).
@@ -522,16 +707,22 @@ class PeriodComparisonResult:
 def analyze_combined(
     sleep_df: pd.DataFrame,
     hr_df: pd.DataFrame,
+    start_date: date | None = None,
+    end_date: date | None = None,
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> CombinedAnalytics:
     """Compute combined sleep and heart rate analytics.
     
     Uses sleep periods from sleep_df to filter out HR samples during sleep.
+    If start_date and end_date are provided, generates fallback sleep intervals
+    for dates without sleep records using monthly average bedtimes.
     
     Args:
         sleep_df: DataFrame with sleep data (from oura_sleep_to_dataframe).
         hr_df: DataFrame with heart rate data (from oura_heartrate_to_dataframe).
+        start_date: Optional start of date range for fallback sleep intervals.
+        end_date: Optional end of date range for fallback sleep intervals.
         max_gap_seconds: Maximum gap in seconds between consecutive HR points.
         resample_interval: Pandas frequency string for HR resampling interval.
     
@@ -540,7 +731,7 @@ def analyze_combined(
     """
     sleep_analytics = analyze_sleep(sleep_df)
     
-    sleep_intervals = get_sleep_intervals(sleep_df)
+    sleep_intervals = get_sleep_intervals(sleep_df, start_date, end_date)
     hr_analytics = analyze_heart_rate(hr_df, sleep_intervals, max_gap_seconds, resample_interval)
     
     return CombinedAnalytics(sleep=sleep_analytics, heart_rate=hr_analytics)
@@ -549,23 +740,29 @@ def analyze_combined(
 def analyze_combined_daily(
     sleep_df: pd.DataFrame,
     hr_df: pd.DataFrame,
+    start_date: date | None = None,
+    end_date: date | None = None,
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> CombinedDailyAnalytics:
     """Compute combined daily analytics.
     
     Uses sleep periods from sleep_df to filter out HR samples during sleep.
+    If start_date and end_date are provided, generates fallback sleep intervals
+    for dates without sleep records using monthly average bedtimes.
     
     Args:
         sleep_df: DataFrame with sleep data (from oura_sleep_to_dataframe).
         hr_df: DataFrame with heart rate data (from oura_heartrate_to_dataframe).
+        start_date: Optional start of date range for fallback sleep intervals.
+        end_date: Optional end of date range for fallback sleep intervals.
         max_gap_seconds: Maximum gap in seconds between consecutive HR points.
         resample_interval: Pandas frequency string for HR resampling interval.
     
     Returns:
         CombinedDailyAnalytics with daily heart rate analytics.
     """
-    sleep_intervals = get_sleep_intervals(sleep_df)
+    sleep_intervals = get_sleep_intervals(sleep_df, start_date, end_date)
     daily_hr = analyze_heart_rate_daily(hr_df, sleep_intervals, max_gap_seconds, resample_interval)
     
     return CombinedDailyAnalytics(days=daily_hr)
@@ -603,9 +800,9 @@ def compare_periods(
     Returns:
         PeriodComparisonResult with comparison metrics and significance assessment.
     """
-    # Analyze each period
-    pre_analytics = analyze_combined(pre_sleep_df, pre_hr_df, max_gap_seconds, resample_interval)
-    post_analytics = analyze_combined(post_sleep_df, post_hr_df, max_gap_seconds, resample_interval)
+    # Analyze each period (using date ranges for fallback sleep intervals)
+    pre_analytics = analyze_combined(pre_sleep_df, pre_hr_df, pre_start, pre_end, max_gap_seconds, resample_interval)
+    post_analytics = analyze_combined(post_sleep_df, post_hr_df, post_start, post_end, max_gap_seconds, resample_interval)
     
     # Calculate deltas
     sleep_duration_diff = post_analytics.sleep.median_sleep_duration - pre_analytics.sleep.median_sleep_duration
