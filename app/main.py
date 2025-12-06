@@ -17,11 +17,14 @@ logging.basicConfig(
     format="%(levelname)s:     %(name)s - %(message)s",
 )
 
-from app.auth import router as auth_router, get_stored_token
+from app.auth import router as auth_router, get_stored_token, get_garmin_client
 from app.oura_client import OuraClient, DataSource, NotAuthenticatedError
+from app.garmin_client import GarminClient, DataSource as GarminDataSource, NotAuthenticatedError as GarminNotAuthenticatedError
 from app.analytics import (
     oura_sleep_to_dataframe,
     oura_heartrate_to_dataframe,
+    garmin_sleep_to_dataframe,
+    garmin_heartrate_to_dataframe,
     analyze_combined,
     analyze_combined_daily,
     compare_periods,
@@ -405,6 +408,180 @@ async def raw_sleep(
             "data": raw_response.get("data", []),
         }
     except NotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Garmin Endpoints
+# =============================================================================
+
+def _get_garmin_client_from_auth() -> GarminClient:
+    """Get a GarminClient using tokens from auth module.
+    
+    This creates a client with a custom wrapper that uses the stored garth tokens.
+    """
+    garth_client = get_garmin_client()
+    if not garth_client:
+        raise GarminNotAuthenticatedError("Not authenticated with Garmin. Please login first.")
+    
+    # Create a GarminClient that will use the authenticated garth client
+    # For now, we'll use a workaround by importing garth and setting it up
+    import garth
+    garth.client = garth_client
+    
+    # Create the client in USER mode
+    client = GarminClient(data_source=GarminDataSource.USER)
+    client._garth_client = garth_client
+    return client
+
+
+@raw_router.get("/garmin/sleep")
+async def raw_garmin_sleep(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get raw sleep data from Garmin.
+    
+    Returns all sleep records in the date range.
+    """
+    try:
+        client = _get_garmin_client_from_auth()
+        raw_response, actual_start, actual_end = await client.get_sleep_data_raw(
+            start_date, end_date
+        )
+        return {
+            "data_source": "garmin",
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "data": raw_response.get("data", []),
+        }
+    except GarminNotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@raw_router.get("/garmin/stress")
+async def raw_garmin_stress(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get raw stress data from Garmin.
+    
+    Returns daily stress records in the date range.
+    """
+    try:
+        client = _get_garmin_client_from_auth()
+        raw_response, actual_start, actual_end = await client.get_stress_data_raw(
+            start_date, end_date
+        )
+        return {
+            "data_source": "garmin",
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "data": raw_response.get("data", []),
+        }
+    except GarminNotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@raw_router.get("/garmin/hrv")
+async def raw_garmin_hrv(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get raw HRV data from Garmin.
+    
+    Returns daily HRV records in the date range.
+    """
+    try:
+        client = _get_garmin_client_from_auth()
+        raw_response, actual_start, actual_end = await client.get_hrv_data_raw(
+            start_date, end_date
+        )
+        return {
+            "data_source": "garmin",
+            "start_date": str(actual_start),
+            "end_date": str(actual_end),
+            "data": raw_response.get("data", []),
+        }
+    except GarminNotAuthenticatedError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@analytics_router.get("/garmin")
+async def garmin_combined_analytics(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD), defaults to 28 days ago"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """
+    Get combined sleep and heart rate analytics from Garmin.
+    
+    Returns sleep analytics (median duration, HR, HRV, percentiles).
+    Note: Garmin doesn't provide continuous HR data like Oura, so heart rate analytics
+    will be based on sleep HR data only.
+    """
+    try:
+        client = _get_garmin_client_from_auth()
+        
+        # Fetch sleep data
+        sleep_data, actual_start, actual_end = await client.get_sleep_data(start_date, end_date)
+        heartrate_data, _, _ = await client.get_heartrate_data(start_date, end_date)
+        
+        sleep_df = garmin_sleep_to_dataframe(sleep_data)
+        hr_df = garmin_heartrate_to_dataframe(heartrate_data)
+        
+        analytics = analyze_combined(sleep_df, hr_df)
+        
+        return {
+            "data_source": "garmin",
+            "sleep": {
+                "start_date": str(analytics.sleep.start_date) if analytics.sleep.start_date else None,
+                "end_date": str(analytics.sleep.end_date) if analytics.sleep.end_date else None,
+                "nights_count": analytics.sleep.nights_count,
+                "median_sleep_duration": analytics.sleep.median_sleep_duration,
+                "sleep_duration_std": analytics.sleep.sleep_duration_std,
+                "median_avg_hr": analytics.sleep.median_avg_hr,
+                "avg_hr_std": analytics.sleep.avg_hr_std,
+                "median_avg_hrv": analytics.sleep.median_avg_hrv,
+                "avg_hrv_std": analytics.sleep.avg_hrv_std,
+                "hr_20th_percentile": analytics.sleep.hr_20th_percentile,
+                "hr_80th_percentile": analytics.sleep.hr_80th_percentile,
+                "hrv_20th_percentile": analytics.sleep.hrv_20th_percentile,
+                "hrv_80th_percentile": analytics.sleep.hrv_80th_percentile,
+            },
+            "heart_rate": {
+                "start_date": str(analytics.heart_rate.start_date) if analytics.heart_rate.start_date else None,
+                "end_date": str(analytics.heart_rate.end_date) if analytics.heart_rate.end_date else None,
+                "hours_with_good_data": analytics.heart_rate.hours_with_good_data,
+                "sleep_hours_filtered": analytics.heart_rate.sleep_hours_filtered,
+                "average_hr": analytics.heart_rate.average_hr,
+                "average_hr_std": analytics.heart_rate.average_hr_std,
+                "hr_20th_percentile": analytics.heart_rate.hr_20th_percentile,
+                "hr_50th_percentile": analytics.heart_rate.hr_50th_percentile,
+                "hr_80th_percentile": analytics.heart_rate.hr_80th_percentile,
+                "hr_95th_percentile": analytics.heart_rate.hr_95th_percentile,
+                "hr_99th_percentile": analytics.heart_rate.hr_99th_percentile,
+            },
+        }
+    except GarminNotAuthenticatedError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

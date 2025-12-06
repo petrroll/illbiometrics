@@ -8,22 +8,92 @@
 </head>
 <body class="bg-gray-100 min-h-screen">
     <div class="container mx-auto px-4 py-8 max-w-4xl">
-        <!-- Header with Login -->
+        <!-- Header with Data Source Selector -->
         <div class="flex justify-between items-center mb-8">
             <h1 class="text-3xl font-bold text-gray-800">Biometrics Dashboard</h1>
-            <div id="authSection">
-                <button id="loginBtn" onclick="window.location.href='/auth/login?redirect_uri=' + encodeURIComponent(window.location.pathname)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
-                    </svg>
-                    Connect Data Source
-                </button>
-                <span id="authStatus" class="hidden text-green-600 font-medium flex items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                    </svg>
-                    Connected
-                </span>
+            <div id="authSection" class="flex items-center gap-4">
+                <!-- Data Source Selector -->
+                <select id="dataSourceSelect" onchange="onDataSourceChange()" class="border rounded px-3 py-2 text-gray-700 bg-white">
+                    <option value="oura">Oura Ring</option>
+                    <option value="garmin">Garmin</option>
+                </select>
+                
+                <!-- Oura Auth -->
+                <div id="ouraAuthSection">
+                    <button id="ouraLoginBtn" onclick="window.location.href='/auth/login?redirect_uri=' + encodeURIComponent(window.location.pathname)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                        </svg>
+                        Connect Oura
+                    </button>
+                    <span id="ouraAuthStatus" class="hidden text-green-600 font-medium flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        Oura Connected
+                    </span>
+                </div>
+                
+                <!-- Garmin Auth -->
+                <div id="garminAuthSection" class="hidden">
+                    <button id="garminLoginBtn" onclick="showGarminLoginModal()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                        </svg>
+                        Connect Garmin
+                    </button>
+                    <span id="garminAuthStatus" class="hidden text-green-600 font-medium flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span id="garminUsername">Garmin Connected</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Garmin Login Modal -->
+        <div id="garminLoginModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold text-gray-800">Connect Garmin</h3>
+                    <button onclick="hideGarminLoginModal()" class="text-gray-500 hover:text-gray-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- Login Form -->
+                <form id="garminLoginForm" onsubmit="submitGarminLogin(event)" class="space-y-4">
+                    <div id="garminEmailField">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input type="email" id="garminEmail" required class="w-full border rounded px-3 py-2 text-gray-700" placeholder="your@email.com" />
+                    </div>
+                    <div id="garminPasswordField">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input type="password" id="garminPassword" required class="w-full border rounded px-3 py-2 text-gray-700" placeholder="••••••••" />
+                    </div>
+                    
+                    <!-- MFA Field (hidden by default) -->
+                    <div id="garminMfaField" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">MFA Code</label>
+                        <input type="text" id="garminMfaCode" class="w-full border rounded px-3 py-2 text-gray-700" placeholder="123456" pattern="[0-9]{6}" />
+                        <p class="text-sm text-gray-500 mt-1">Enter the 6-digit code from your authenticator app</p>
+                    </div>
+                    
+                    <!-- Error message -->
+                    <div id="garminLoginError" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded text-sm"></div>
+                    
+                    <!-- Submit button -->
+                    <button type="submit" id="garminSubmitBtn" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium">
+                        Sign In
+                    </button>
+                </form>
+                
+                <p class="text-xs text-gray-500 mt-4 text-center">
+                    Your credentials are sent securely to Garmin Connect and are not stored.
+                </p>
             </div>
         </div>
         
@@ -308,6 +378,8 @@
         let treatmentComparisonData = null;
         let userHasModifiedTreatmentType = false;
         let suggestedTreatmentType = 'no_effect';
+        let currentDataSource = 'oura';
+        let garminNeedsMfa = false;
         let suggestedEffectiveness = 1;
 
         /**
@@ -358,13 +430,33 @@
         initMonthPicker();
         onMonthChange();
 
-        // Check authentication status
-        async function checkAuthStatus() {
+        // === Data Source Selection ===
+        function onDataSourceChange() {
+            const select = document.getElementById('dataSourceSelect');
+            currentDataSource = select.value;
+            
+            const ouraSection = document.getElementById('ouraAuthSection');
+            const garminSection = document.getElementById('garminAuthSection');
+            
+            if (currentDataSource === 'oura') {
+                ouraSection.classList.remove('hidden');
+                garminSection.classList.add('hidden');
+            } else {
+                ouraSection.classList.add('hidden');
+                garminSection.classList.remove('hidden');
+            }
+            
+            // Reload data with new source
+            loadData();
+        }
+
+        // === Oura Authentication ===
+        async function checkOuraAuthStatus() {
             try {
                 const response = await fetch('/auth/status');
                 const data = await response.json();
-                const loginBtn = document.getElementById('loginBtn');
-                const authStatus = document.getElementById('authStatus');
+                const loginBtn = document.getElementById('ouraLoginBtn');
+                const authStatus = document.getElementById('ouraAuthStatus');
                 
                 if (data.authenticated) {
                     loginBtn.classList.add('hidden');
@@ -374,8 +466,135 @@
                     authStatus.classList.add('hidden');
                 }
             } catch (err) {
-                console.error('Failed to check auth status:', err);
+                console.error('Failed to check Oura auth status:', err);
             }
+        }
+
+        // === Garmin Authentication ===
+        async function checkGarminAuthStatus() {
+            try {
+                const response = await fetch('/auth/garmin/status');
+                const data = await response.json();
+                const loginBtn = document.getElementById('garminLoginBtn');
+                const authStatus = document.getElementById('garminAuthStatus');
+                const usernameSpan = document.getElementById('garminUsername');
+                
+                if (data.authenticated) {
+                    loginBtn.classList.add('hidden');
+                    authStatus.classList.remove('hidden');
+                    if (data.username) {
+                        usernameSpan.textContent = `Garmin: ${data.username}`;
+                    }
+                } else {
+                    loginBtn.classList.remove('hidden');
+                    authStatus.classList.add('hidden');
+                }
+            } catch (err) {
+                console.error('Failed to check Garmin auth status:', err);
+            }
+        }
+
+        function showGarminLoginModal() {
+            document.getElementById('garminLoginModal').classList.remove('hidden');
+            document.getElementById('garminEmail').focus();
+            resetGarminLoginForm();
+        }
+
+        function hideGarminLoginModal() {
+            document.getElementById('garminLoginModal').classList.add('hidden');
+            resetGarminLoginForm();
+        }
+
+        function resetGarminLoginForm() {
+            document.getElementById('garminLoginForm').reset();
+            document.getElementById('garminLoginError').classList.add('hidden');
+            document.getElementById('garminMfaField').classList.add('hidden');
+            document.getElementById('garminEmailField').classList.remove('hidden');
+            document.getElementById('garminPasswordField').classList.remove('hidden');
+            document.getElementById('garminSubmitBtn').textContent = 'Sign In';
+            garminNeedsMfa = false;
+        }
+
+        async function submitGarminLogin(event) {
+            event.preventDefault();
+            
+            const submitBtn = document.getElementById('garminSubmitBtn');
+            const errorDiv = document.getElementById('garminLoginError');
+            errorDiv.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Signing in...';
+            
+            try {
+                if (garminNeedsMfa) {
+                    // Submit MFA code
+                    const mfaCode = document.getElementById('garminMfaCode').value;
+                    const response = await fetch('/auth/garmin/mfa', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mfa_code: mfaCode })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.detail || 'MFA verification failed');
+                    }
+                    
+                    // Success!
+                    hideGarminLoginModal();
+                    await checkGarminAuthStatus();
+                    loadData();
+                } else {
+                    // Initial login
+                    const email = document.getElementById('garminEmail').value;
+                    const password = document.getElementById('garminPassword').value;
+                    
+                    const response = await fetch('/auth/garmin/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.detail || 'Login failed');
+                    }
+                    
+                    if (data.needs_mfa) {
+                        // Show MFA field
+                        garminNeedsMfa = true;
+                        document.getElementById('garminEmailField').classList.add('hidden');
+                        document.getElementById('garminPasswordField').classList.add('hidden');
+                        document.getElementById('garminMfaField').classList.remove('hidden');
+                        document.getElementById('garminMfaCode').focus();
+                        submitBtn.textContent = 'Verify MFA';
+                    } else {
+                        // Success!
+                        hideGarminLoginModal();
+                        await checkGarminAuthStatus();
+                        loadData();
+                    }
+                }
+            } catch (err) {
+                errorDiv.textContent = err.message;
+                errorDiv.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                if (!garminNeedsMfa) {
+                    submitBtn.textContent = 'Sign In';
+                } else {
+                    submitBtn.textContent = 'Verify MFA';
+                }
+            }
+        }
+
+        // Check all auth statuses
+        async function checkAuthStatus() {
+            await Promise.all([
+                checkOuraAuthStatus(),
+                checkGarminAuthStatus()
+            ]);
         }
 
         function formatDuration(seconds) {
@@ -409,12 +628,31 @@
             const queryString = params.toString() ? '?' + params.toString() : '';
 
             try {
-                // Fetch all data in parallel
-                const [analyticsRes, rawSleepRes, rawHrRes] = await Promise.all([
-                    fetch('/analytics' + queryString),
-                    fetch('/raw/oura/sleep' + queryString),
-                    fetch('/raw/oura/heartrate' + queryString)
-                ]);
+                // Determine which endpoints to use based on selected data source
+                let analyticsUrl, rawSleepUrl, rawHrUrl;
+                
+                if (currentDataSource === 'garmin') {
+                    analyticsUrl = '/analytics/garmin' + queryString;
+                    rawSleepUrl = '/raw/garmin/sleep' + queryString;
+                    rawHrUrl = null; // Garmin doesn't have continuous HR endpoint yet
+                } else {
+                    analyticsUrl = '/analytics' + queryString;
+                    rawSleepUrl = '/raw/oura/sleep' + queryString;
+                    rawHrUrl = '/raw/oura/heartrate' + queryString;
+                }
+
+                // Fetch analytics and raw data
+                const fetchPromises = [
+                    fetch(analyticsUrl),
+                    fetch(rawSleepUrl)
+                ];
+                if (rawHrUrl) {
+                    fetchPromises.push(fetch(rawHrUrl));
+                }
+
+                const responses = await Promise.all(fetchPromises);
+                const [analyticsRes, rawSleepRes] = responses;
+                const rawHrRes = responses[2] || null;
 
                 if (!analyticsRes.ok) {
                     const errorData = await analyticsRes.json();
@@ -425,7 +663,7 @@
                 const sleepData = analyticsData.sleep;
                 const hrData = analyticsData.heart_rate;
                 rawSleepData = await rawSleepRes.json();
-                rawHrData = await rawHrRes.json();
+                rawHrData = rawHrRes ? await rawHrRes.json() : { data: [], data_source: currentDataSource };
 
                 // Update Sleep Analytics
                 document.getElementById('sleepDateRange').textContent = 

@@ -1,3 +1,5 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -14,6 +16,9 @@ from garth import DailyHRV as GarthDailyHRV
 from app.config import GARMIN_TOKEN_DIR, SANDBOX_CACHE_DIR
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for running blocking garth API calls
+_garmin_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="garmin_api")
 
 # Default query timespan is 28 days. This is chosen because:
 # 1. It's exactly 4 weeks, making it unbiased to day-of-week cycles
@@ -315,12 +320,26 @@ class GarminClient:
         # User mode - fetch from Garmin via garth
         self._ensure_authenticated()
         
-        # Fetch sleep data for the date range
+        # Run blocking garth API calls in thread pool
+        loop = asyncio.get_event_loop()
+        data_list = await loop.run_in_executor(
+            _garmin_executor,
+            self._fetch_sleep_data_sync,
+            start_date,
+            end_date
+        )
+        
+        json_data = {"data": data_list}
+        return json_data, start_date, end_date
+    
+    def _fetch_sleep_data_sync(self, start_date: date, end_date: date) -> list[dict]:
+        """Fetch sleep data synchronously. Must be run in a thread pool."""
         data_list = []
         current_date = start_date
         while current_date <= end_date:
             try:
-                sleep_data = GarthSleepData.get(str(current_date))
+                # Use the authenticated client
+                sleep_data = GarthSleepData.get(str(current_date), client=self._garth_client)
                 if sleep_data:
                     # Convert to dict format
                     data_list.append({
@@ -345,8 +364,7 @@ class GarminClient:
                 logger.debug(f"No sleep data for {current_date}: {e}")
             current_date += timedelta(days=1)
         
-        json_data = {"data": data_list}
-        return json_data, start_date, end_date
+        return data_list
     
     async def get_sleep_data(
         self,
@@ -412,9 +430,23 @@ class GarminClient:
         # Calculate number of days
         days = (end_date - start_date).days + 1
         
+        # Run blocking garth API calls in thread pool
+        loop = asyncio.get_event_loop()
+        data_list = await loop.run_in_executor(
+            _garmin_executor,
+            self._fetch_stress_data_sync,
+            end_date,
+            days
+        )
+        
+        json_data = {"data": data_list}
+        return json_data, start_date, end_date
+    
+    def _fetch_stress_data_sync(self, end_date: date, days: int) -> list[dict]:
+        """Fetch stress data synchronously. Must be run in a thread pool."""
+        data_list = []
         try:
-            stress_list = GarthDailyStress.list(str(end_date), days)
-            data_list = []
+            stress_list = GarthDailyStress.list(str(end_date), days, client=self._garth_client)
             for stress in stress_list:
                 data_list.append({
                     "calendar_date": str(stress.calendar_date),
@@ -424,12 +456,9 @@ class GarminClient:
                     "medium_stress_duration": stress.medium_stress_duration,
                     "high_stress_duration": stress.high_stress_duration,
                 })
-            json_data = {"data": data_list}
         except Exception as e:
             logger.warning(f"Failed to fetch stress data: {e}")
-            json_data = {"data": []}
-        
-        return json_data, start_date, end_date
+        return data_list
     
     async def get_stress_data(
         self,
@@ -495,9 +524,24 @@ class GarminClient:
         # Calculate number of days
         days = (end_date - start_date).days + 1
         
+        # Run blocking garth API calls in thread pool
+        loop = asyncio.get_event_loop()
+        data_list = await loop.run_in_executor(
+            _garmin_executor,
+            self._fetch_hrv_data_sync,
+            start_date,
+            end_date,
+            days
+        )
+        
+        json_data = {"data": data_list}
+        return json_data, start_date, end_date
+    
+    def _fetch_hrv_data_sync(self, start_date: date, end_date: date, days: int) -> list[dict]:
+        """Fetch HRV data synchronously. Must be run in a thread pool."""
+        data_list = []
         try:
-            hrv_list = GarthDailyHRV.list(period=days)
-            data_list = []
+            hrv_list = GarthDailyHRV.list(period=days, client=self._garth_client)
             for hrv in hrv_list:
                 # Filter to date range
                 if start_date <= hrv.calendar_date <= end_date:
@@ -508,12 +552,9 @@ class GarminClient:
                         "last_night_5_min_high": hrv.last_night_5_min_high,
                         "status": hrv.status,
                     })
-            json_data = {"data": data_list}
         except Exception as e:
             logger.warning(f"Failed to fetch HRV data: {e}")
-            json_data = {"data": []}
-        
-        return json_data, start_date, end_date
+        return data_list
     
     async def get_heartrate_data_raw(
         self,
