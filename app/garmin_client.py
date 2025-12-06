@@ -52,6 +52,18 @@ class HeartRateData:
 
 
 @dataclass
+class DailyHeartRateData:
+    """Daily heart rate data from Garmin."""
+    calendar_date: date
+    resting_heart_rate: Optional[int]
+    max_heart_rate: Optional[int]
+    min_heart_rate: Optional[int]
+    last_seven_days_avg_resting_heart_rate: Optional[int]
+    # Heart rate values are [timestamp_ms, bpm] pairs
+    heart_rate_values: list[list[int]]
+
+
+@dataclass
 class SleepHRData:
     """Sleep heart rate data."""
     interval: float
@@ -565,9 +577,8 @@ class GarminClient:
         """
         Fetch raw heart rate data from Garmin API without parsing.
         
-        Note: Garmin doesn't have a simple heart rate endpoint like Oura.
-        This returns an empty result for now - heart rate is embedded in activities
-        and other data sources.
+        Uses the dailyHeartRate endpoint which provides time series heart rate data
+        along with daily summary stats (resting, min, max HR).
         
         Args:
             start_date: Start date for data range
@@ -595,10 +606,57 @@ class GarminClient:
                 # Return empty data for sandbox without cache
                 return {"data": []}, start_date, end_date
         
-        # User mode - Garmin heart rate requires different API approach
-        # For now, return empty - this can be expanded later
-        logger.info("Garmin heart rate API not yet implemented for USER mode")
-        return {"data": []}, start_date, end_date
+        # User mode - fetch from Garmin via garth connectapi
+        self._ensure_authenticated()
+        
+        # Run blocking garth API calls in thread pool
+        loop = asyncio.get_event_loop()
+        data_list = await loop.run_in_executor(
+            _garmin_executor,
+            self._fetch_heartrate_data_sync,
+            start_date,
+            end_date
+        )
+        
+        json_data = {"data": data_list}
+        return json_data, start_date, end_date
+    
+    def _fetch_heartrate_data_sync(self, start_date: date, end_date: date) -> list[dict]:
+        """
+        Fetch heart rate data synchronously. Must be run in a thread pool.
+        
+        Uses the /wellness-service/wellness/dailyHeartRate endpoint which returns
+        daily heart rate data including time series values.
+        """
+        data_list = []
+        current_date = start_date
+        
+        while current_date <= end_date:
+            try:
+                # Use the connectapi to fetch daily heart rate data
+                # Endpoint based on https://github.com/matin/garth/issues/134
+                path = f"/wellness-service/wellness/dailyHeartRate/?date={current_date}"
+                hr_data = self._garth_client.connectapi(path)
+                
+                if hr_data and isinstance(hr_data, dict):
+                    # Extract heart rate samples from heartRateValues
+                    # Format is [[timestamp_ms, bpm], ...]
+                    heart_rate_values = hr_data.get("heartRateValues", [])
+                    
+                    data_list.append({
+                        "calendar_date": str(current_date),
+                        "resting_heart_rate": hr_data.get("restingHeartRate"),
+                        "max_heart_rate": hr_data.get("maxHeartRate"),
+                        "min_heart_rate": hr_data.get("minHeartRate"),
+                        "last_seven_days_avg_resting_heart_rate": hr_data.get("lastSevenDaysAvgRestingHeartRate"),
+                        "heart_rate_values": heart_rate_values,
+                    })
+            except Exception as e:
+                logger.debug(f"No heart rate data for {current_date}: {e}")
+            
+            current_date += timedelta(days=1)
+        
+        return data_list
     
     async def get_heartrate_data(
         self,
@@ -608,6 +666,8 @@ class GarminClient:
     ) -> tuple[HeartRateData, date, date]:
         """
         Fetch heart rate data from Garmin API.
+        
+        Converts the daily heart rate data into a flat list of HeartRateSample objects.
         
         Args:
             start_date: Start date for data range
@@ -621,12 +681,64 @@ class GarminClient:
             start_date, end_date, client_key
         )
         
-        samples = [
-            HeartRateSample(
-                bpm=item.get("bpm", 0),
-                source=item.get("source", "garmin"),
-                timestamp=item.get("timestamp", ""),
-            )
-            for item in json_data.get("data", [])
-        ]
+        samples = []
+        for day_data in json_data.get("data", []):
+            # Convert heart_rate_values [[timestamp_ms, bpm], ...] to HeartRateSample objects
+            for hr_value in day_data.get("heart_rate_values", []):
+                if isinstance(hr_value, list) and len(hr_value) >= 2:
+                    timestamp_ms, bpm = hr_value[0], hr_value[1]
+                    # Convert timestamp from milliseconds to ISO format
+                    if isinstance(timestamp_ms, int) and isinstance(bpm, int) and bpm > 0:
+                        timestamp = datetime.fromtimestamp(
+                            timestamp_ms / 1000, tz=timezone.utc
+                        ).isoformat()
+                        samples.append(HeartRateSample(
+                            bpm=bpm,
+                            source="garmin",
+                            timestamp=timestamp,
+                        ))
+        
         return HeartRateData(data=samples), start_date, end_date
+    
+    async def get_daily_heartrate_data(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_key: str = "default",
+    ) -> tuple[list[DailyHeartRateData], date, date]:
+        """
+        Fetch daily heart rate summary data from Garmin API.
+        
+        Returns structured daily heart rate data including resting HR, min/max,
+        and the time series values.
+        
+        Args:
+            start_date: Start date for data range
+            end_date: End date for data range
+            client_key: Ignored for Garmin (for API compatibility)
+        
+        Returns:
+            Tuple of (daily_heartrate_data_list, start_date, end_date)
+        """
+        json_data, start_date, end_date = await self.get_heartrate_data_raw(
+            start_date, end_date, client_key
+        )
+        
+        daily_data = []
+        for item in json_data.get("data", []):
+            calendar_date = item.get("calendar_date")
+            if isinstance(calendar_date, str):
+                calendar_date = date.fromisoformat(calendar_date)
+            elif not isinstance(calendar_date, date):
+                continue
+            
+            daily_data.append(DailyHeartRateData(
+                calendar_date=calendar_date,
+                resting_heart_rate=item.get("resting_heart_rate"),
+                max_heart_rate=item.get("max_heart_rate"),
+                min_heart_rate=item.get("min_heart_rate"),
+                last_seven_days_avg_resting_heart_rate=item.get("last_seven_days_avg_resting_heart_rate"),
+                heart_rate_values=item.get("heart_rate_values", []),
+            ))
+        
+        return daily_data, start_date, end_date
