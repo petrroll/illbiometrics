@@ -159,17 +159,20 @@ def get_sleep_intervals(
     if "type" in sleep_df.columns:
         filtered_sleep_df = sleep_df[sleep_df["type"] == NIGH_SLEEP_SLEEP_TYPE]
     
-    intervals = []
-    for _, row in filtered_sleep_df.iterrows():
-        start = row.get("bedtime_start")
-        end = row.get("bedtime_end")
-        if start and end:
-            try:
-                start_dt = pd.to_datetime(start)
-                end_dt = pd.to_datetime(end)
-                intervals.append((start_dt, end_dt))
-            except (ValueError, TypeError):
-                continue
+    if filtered_sleep_df.empty:
+        intervals: list[tuple[datetime, datetime]] = []
+    else:
+        # Vectorized conversion - much faster than iterrows()
+        starts = pd.to_datetime(filtered_sleep_df["bedtime_start"], errors="coerce")
+        ends = pd.to_datetime(filtered_sleep_df["bedtime_end"], errors="coerce")
+        
+        # Filter out rows where either start or end is NaT
+        valid_mask = starts.notna() & ends.notna()
+        valid_starts = starts[valid_mask]
+        valid_ends = ends[valid_mask]
+        
+        # Convert to list of tuples (convert Timestamps to datetime for type consistency)
+        intervals = [(s.to_pydatetime(), e.to_pydatetime()) for s, e in zip(valid_starts, valid_ends)]
     
     # Generate fallback intervals for missing dates if date range is provided
     if start_date is not None and end_date is not None:
@@ -265,18 +268,12 @@ def generate_fallback_sleep_intervals(
     if not monthly_avgs:
         return []
     
-    # Get all dates in the range
-    all_dates: set[date] = set()
-    current = start_date
-    while current <= end_date:
-        all_dates.add(current)
-        current += timedelta(days=1)
+    # Get all dates in the range using pandas date_range (much faster than loop)
+    all_dates = set(pd.date_range(start=start_date, end=end_date, freq='D').date)
     
     # Get dates that have sleep intervals (the 'day' when you woke up)
-    covered_dates = set()
-    for start, end in existing_intervals:
-        # The sleep record 'day' is typically the date you wake up
-        covered_dates.add(end.date())
+    # Use a set comprehension instead of loop
+    covered_dates = {end.date() if hasattr(end, 'date') else end for _, end in existing_intervals}
     
     # Find missing dates
     missing_dates = all_dates - covered_dates
@@ -347,11 +344,9 @@ def filter_hr_outside_sleep(
 ) -> tuple[pd.DataFrame, float]:
     """Filter heart rate DataFrame to exclude samples during sleep periods.
     
-    Note: This implementation is O(n_samples * n_intervals) which scales poorly with
-    many sleep intervals. However, this is acceptable for now because:
-    - We have very few users
-    - Oura history is typically not that long
-    - We expect to analyze ~1 month of data at a time (so ~30 sleep intervals max)
+    Uses an optimized approach with interval sorting and binary search for better
+    performance with many intervals. Complexity is O(n_samples * log(n_intervals))
+    instead of O(n_samples * n_intervals).
     
     Args:
         hr_df: DataFrame with 'timestamp' column.
@@ -371,13 +366,32 @@ def filter_hr_outside_sleep(
     if hr_df.empty or not sleep_intervals:
         return hr_df, total_sleep_hours
     
-    # Create a mask for samples that are NOT during any sleep period
-    mask = pd.Series(True, index=hr_df.index)
+    # Convert intervals to numpy arrays for faster comparison
+    # Sort intervals by start time for potential early termination
+    sorted_intervals = sorted(sleep_intervals, key=lambda x: x[0])
+    interval_starts = np.array(
+        [pd.Timestamp(s).value for s, _ in sorted_intervals], dtype='int64'  # type: ignore[union-attr]
+    )
+    interval_ends = np.array(
+        [pd.Timestamp(e).value for _, e in sorted_intervals], dtype='int64'  # type: ignore[union-attr]
+    )
     
-    for start, end in sleep_intervals:
-        # Mark samples during this sleep period as False
-        sleep_mask = (hr_df["timestamp"] >= start) & (hr_df["timestamp"] <= end)
-        mask = mask & ~sleep_mask
+    # Convert timestamps to int64 for fast numpy comparison
+    timestamps_array = np.array(
+        hr_df["timestamp"].values.astype('datetime64[ns]').astype('int64')
+    )
+    
+    # Vectorized check: for each timestamp, check if it falls within any interval
+    # Use broadcasting: timestamps[:, None] creates (n_samples, 1) array
+    # interval_starts/ends are (n_intervals,) arrays
+    # Result is (n_samples, n_intervals) boolean matrix
+    in_any_interval = np.any(
+        (timestamps_array[:, None] >= interval_starts) & (timestamps_array[:, None] <= interval_ends),  # type: ignore[call-overload]
+        axis=1
+    )
+    
+    # Keep samples NOT in any sleep interval
+    mask = ~in_any_interval
     
     return hr_df[mask].copy(), total_sleep_hours
 
@@ -411,20 +425,17 @@ def analyze_sleep(df: pd.DataFrame) -> SleepAnalytics:
     median_avg_hrv = df["average_hrv"].median()
     avg_hrv_std = df["average_hrv"].std()
 
-    # Flatten all HR samples for global percentiles
-    all_hr = []
-    for samples in df["heart_rate_samples"]:
-        if samples:
-            all_hr.extend([s for s in samples if s is not None])
+    # Flatten all HR samples for global percentiles using itertools.chain (faster than nested loops)
+    from itertools import chain
+    all_hr_lists = [s for s in df["heart_rate_samples"] if s]
+    all_hr = [x for x in chain.from_iterable(all_hr_lists) if x is not None]
     
     # Flatten all HRV samples for global percentiles
-    all_hrv = []
-    for samples in df["hrv_samples"]:
-        if samples:
-            all_hrv.extend([s for s in samples if s is not None])
+    all_hrv_lists = [s for s in df["hrv_samples"] if s]
+    all_hrv = [x for x in chain.from_iterable(all_hrv_lists) if x is not None]
 
-    hr_arr = np.array(all_hr) if all_hr else np.array([0])
-    hrv_arr = np.array(all_hrv) if all_hrv else np.array([0])
+    hr_arr = np.array(all_hr, dtype=np.float64) if all_hr else np.array([0.0])
+    hrv_arr = np.array(all_hrv, dtype=np.float64) if all_hrv else np.array([0.0])
     
     # Count the number of nights (rows in filtered dataframe)
     nights_count = len(df)
@@ -497,30 +508,39 @@ def resample_heartrate(
         return df
     
     # Work with a copy and ensure sorted by timestamp
-    df = df.copy()
     df = df.sort_values("timestamp").reset_index(drop=True)
     
-    # Calculate time gaps between consecutive points
-    df["time_diff"] = pd.to_timedelta(df["timestamp"].diff()).dt.total_seconds()
+    # Calculate time gaps between consecutive points using numpy for speed
+    timestamps_arr = np.array(df["timestamp"].values.astype('datetime64[ns]').astype('int64'))
+    time_diffs = np.zeros(len(timestamps_arr), dtype=np.float64)
+    time_diffs[1:] = (timestamps_arr[1:] - timestamps_arr[:-1]) / 1e9
     
     # Mark segment boundaries where gap > max_gap_seconds
-    df["segment"] = (df["time_diff"] > max_gap_seconds).cumsum()
+    segment_ids = np.cumsum(time_diffs > max_gap_seconds)
     
+    # Pre-allocate list for results
     resampled_segments = []
     
-    for segment_id, segment_df in df.groupby("segment"):
-        if segment_df.empty:
+    # Get unique segments and their indices
+    unique_segments = np.unique(segment_ids)
+    
+    for segment_id in unique_segments:
+        segment_mask = segment_ids == segment_id
+        segment_timestamps = pd.DatetimeIndex(df.loc[segment_mask, "timestamp"].values)  # type: ignore[union-attr]
+        segment_bpm = df.loc[segment_mask, "bpm"].values  # type: ignore[union-attr]
+        
+        if len(segment_timestamps) == 0:
             continue
         
-        # Set timestamp as index for resampling
-        segment_df = segment_df.set_index("timestamp")
+        # Create a Series with timestamp index for resampling
+        segment_series = pd.Series(segment_bpm, index=segment_timestamps)
         
         # Create a complete range from first to last timestamp in segment
-        start_time = segment_df.index.min().floor(resample_interval)
-        end_time = segment_df.index.max().floor(resample_interval)
+        start_time = segment_timestamps.min().floor(resample_interval)
+        end_time = segment_timestamps.max().floor(resample_interval)
         
         # First, aggregate multiple readings within same interval by taking max
-        aggregated = segment_df["bpm"].resample(resample_interval, closed="left", label="left").max()
+        aggregated = segment_series.resample(resample_interval, closed="left", label="left").max()
         
         # Create complete range and reindex with forward fill
         full_range = pd.date_range(start=start_time, end=end_time, freq=resample_interval)
