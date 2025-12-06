@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Sequence
 import pandas as pd
 import numpy as np
 
@@ -161,7 +161,7 @@ def get_sleep_intervals(sleep_df: pd.DataFrame) -> list[tuple[datetime, datetime
     return intervals
 
 
-def filter_hr_outside_sleep(hr_df: pd.DataFrame, sleep_intervals: list[tuple[datetime, datetime]]) -> tuple[pd.DataFrame, float]:
+def filter_hr_outside_sleep(hr_df: pd.DataFrame, sleep_intervals: Sequence[tuple[datetime, datetime]]) -> tuple[pd.DataFrame, float]:
     """Filter heart rate DataFrame to exclude samples during sleep periods.
     
     Note: This implementation is O(n_samples * n_intervals) which scales poorly with
@@ -273,7 +273,7 @@ def oura_heartrate_to_dataframe(heartrate_data: HeartRateData) -> pd.DataFrame:
     df = pd.DataFrame(records)
     if not df.empty:
         df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["day"] = df["timestamp"].dt.date
+        df["day"] = pd.to_datetime(df["timestamp"]).dt.date
     return df
 
 
@@ -316,7 +316,7 @@ def resample_heartrate(
     df = df.sort_values("timestamp").reset_index(drop=True)
     
     # Calculate time gaps between consecutive points
-    df["time_diff"] = df["timestamp"].diff().dt.total_seconds()
+    df["time_diff"] = pd.to_timedelta(df["timestamp"].diff()).dt.total_seconds()
     
     # Mark segment boundaries where gap > max_gap_seconds
     df["segment"] = (df["time_diff"] > max_gap_seconds).cumsum()
@@ -363,7 +363,7 @@ def resample_heartrate(
 
 def analyze_heart_rate(
     hr_df: pd.DataFrame,
-    sleep_intervals: list[tuple[datetime, datetime]],
+    sleep_intervals: Sequence[tuple[datetime, datetime]],
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> HeartRateAnalytics:
@@ -409,7 +409,7 @@ def analyze_heart_rate(
     
     # Count hours with more than 10 samples (based on resampled data)
     resampled_df = resampled_df.copy()
-    resampled_df["hour"] = resampled_df["timestamp"].dt.floor("h")
+    resampled_df["hour"] = pd.to_datetime(resampled_df["timestamp"]).dt.floor("h")
     hourly_counts = resampled_df.groupby("hour").size()
     hours_with_good_data = int((hourly_counts > 10).sum())
 
@@ -430,7 +430,7 @@ def analyze_heart_rate(
 
 def analyze_heart_rate_daily(
     hr_df: pd.DataFrame,
-    sleep_intervals: list[tuple[datetime, datetime]],
+    sleep_intervals: Sequence[tuple[datetime, datetime]],
     max_gap_seconds: int = DEFAULT_HR_MAX_GAP_SECONDS,
     resample_interval: str = DEFAULT_HR_RESAMPLE_INTERVAL,
 ) -> list[DailyHeartRateAnalytics]:
