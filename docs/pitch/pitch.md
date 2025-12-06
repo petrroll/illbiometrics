@@ -14,6 +14,7 @@ Petr Houška, 06/12/2025
 
 # Current treatment data:
 - Lump everyone together & ask improve/not: [Patient-Reported Treatment Outcomes in ME/CFS and Long COVID](https://www.medrxiv.org/content/10.1101/2024.11.27.24317656v1.full)
+- Series cases / anectodatal data
 - Manual input. s.a. current Amatica
 - Manual input of symtoms + automatic correlation with meds: [Guava](https://guavahealth.com/)
 - Manual input of symtom severity & correlate yourself: [Visible](https://www.makevisible.com/)
@@ -26,6 +27,8 @@ Petr Houška, 06/12/2025
   - No correlation to other signals
   - Human memory is very unreliable
   - Only signal dimension: helped or not 
+- Series cases / anectotal
+  - Heavy sample bias
 - Manual input: amatica, guava, visible
   - No aggregation
   - No sharing
