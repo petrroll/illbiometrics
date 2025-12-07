@@ -501,25 +501,25 @@ def resample_heartrate(
     
     # Identify segments at the raw data level: gaps > max_gap_seconds create new segments
     timestamps = pd.DatetimeIndex(df['timestamp'])
-    time_diffs = timestamps.to_series().diff().dt.total_seconds().fillna(0).values
-    segment_ids = (time_diffs > max_gap_seconds).cumsum()
+    time_diffs = np.asarray(timestamps.to_series().diff().dt.total_seconds().fillna(0))
+    segment_ids = (time_diffs > max_gap_seconds).cumsum()  # type: ignore[operator]
     
     ts_series_bpm = pd.Series(df['bpm'].values, index=timestamps)
-    ts_series_seg = pd.Series(segment_ids, index=timestamps)
+    ts_series_seg = pd.Series(segment_ids, index=timestamps)  # type: ignore[arg-type]
     
     # Resample both bpm and segment info
     resampled_bpm = ts_series_bpm.resample(resample_interval, closed='left', label='left').max()
     # For segments, take the min (first segment that has data in this slot)
     resampled_seg = ts_series_seg.resample(resample_interval, closed='left', label='left').min()
     
-    had_data = resampled_bpm.notna().values
+    had_data = np.asarray(resampled_bpm.notna())  # type: ignore[arg-type]
     n = len(had_data)
     
     if not had_data.any():
         return pd.DataFrame(columns=["timestamp", "bpm", "day"])
     
-    bpm_ffill = resampled_bpm.ffill().values
-    seg_ffill = resampled_seg.ffill().values  # Forward-fill segment IDs too
+    bpm_ffill = np.asarray(resampled_bpm.ffill())  # type: ignore[arg-type]
+    seg_ffill = np.asarray(resampled_seg.ffill())  # type: ignore[arg-type]
     
     indices = np.arange(n)
     
@@ -536,9 +536,9 @@ def resample_heartrate(
     next_data_idx = np.where(next_data_idx < n, next_data_idx, -1)
     
     # Get segment of next data (we need the actual segment at that future position)
-    seg_array = np.where(had_data, resampled_seg.values, np.nan)
+    seg_array = np.where(had_data, np.asarray(resampled_seg), np.nan)
     # Back-fill to get "next data's segment"
-    seg_bfill = pd.Series(seg_array).bfill().values
+    seg_bfill = np.asarray(pd.Series(seg_array).bfill())  # type: ignore[arg-type]
     next_data_seg = np.where(next_data_idx >= 0, seg_bfill, -1)
     
     # Valid: has data OR (within max_gap of prev data AND in SAME segment as next data)
@@ -555,7 +555,7 @@ def resample_heartrate(
     )
     
     # Apply mask
-    result_series = pd.Series(bpm_ffill, index=resampled_bpm.index)[valid_mask]
+    result_series = pd.Series(bpm_ffill, index=resampled_bpm.index)[valid_mask]  # type: ignore[arg-type]
     
     if result_series.empty:
         return pd.DataFrame(columns=["timestamp", "bpm", "day"])
@@ -564,7 +564,7 @@ def resample_heartrate(
         'timestamp': result_series.index,
         'bpm': result_series.values,
     })
-    result["day"] = result["timestamp"].dt.date
+    result["day"] = pd.Series(pd.to_datetime(result["timestamp"])).dt.date
     
     return result
 
